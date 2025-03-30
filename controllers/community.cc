@@ -8,17 +8,9 @@
 #include <drogon/orm/Field.h>
 #include <drogon/orm/Mapper.h>
 #include <drogon/orm/Result.h>
+#include <drogon/orm/ResultIterator.h>
 #include <drogon/orm/Row.h>
 #include <drogon/orm/SqlBinder.h>
-
-
-// #include <drogon/orm/Transaction.h>
-#include <drogon/orm/ResultIterator.h>
-// #include <drogon/orm/ResultStream.h>
-// #include <drogon/orm/ResultStreamIterator.h>
-// #include <drogon/orm/ResultStreamRow.h>
-// #include <drogon/orm/ResultStreamField.h>
-// #include <drogon/orm/ResultStreamException.h>
 
 using namespace drogon;
 using namespace drogon::orm;
@@ -30,12 +22,32 @@ void Community::get_posts(
     std::function<void(const HttpResponsePtr&)>&& callback) {
   auto db = app().getDbClient();
 
+  // Get page parameter, default to 1
+  int page = 1;
+  auto pageParam = req->getParameter("page");
+  if (!pageParam.empty()) {
+    try {
+      page = std::stoi(pageParam);
+      if (page < 1) page = 1;
+    } catch (...) {
+      // Invalid page parameter, use default
+      page = 1;
+    }
+  }
+
+  // Set page size
+  const int page_size = 10;
+  std::string val = "10";
+  const int offset = (page - 1) * page_size;
+  std::string val2 = std::to_string(offset);
+
   db->execSqlAsync(
-      "SELECT * FROM posts ORDER BY created_at DESC",
+      "SELECT * FROM posts ORDER BY created_at DESC LIMIT $1 OFFSET $2",
       [callback](const Result& result) {
         Json::Value posts;
         for (const auto& row : result) {
           Json::Value post;
+          post["id"] = row["id"].as<int>();
           post["user"] = row["user_id"].as<std::string>();
           post["content"] = row["content"].as<std::string>();
           post["created_at"] = row["created_at"].as<std::string>();
@@ -45,16 +57,22 @@ void Community::get_posts(
         auto resp = HttpResponse::newHttpJsonResponse(posts);
         callback(resp);
       },
-      [](const DrogonDbException& e) {
+      [callback](const DrogonDbException& e) {
         LOG_ERROR << "Database error: " << e.base().what();
-      });
+        Json::Value error;
+        error["error"] = "Database error";
+        auto resp = HttpResponse::newHttpJsonResponse(error);
+        resp->setStatusCode(k500InternalServerError);
+        callback(resp);
+      },
+      std::to_string(page_size), std::to_string(offset));
 }
 
 void Community::create_post(
     const HttpRequestPtr& req,
     std::function<void(const HttpResponsePtr&)>&& callback) {
   auto json = req->getJsonObject();
-  int userId = (*json)["user_id"].asInt();
+  int user_id = (*json)["user_id"].asInt();
   std::string content = (*json)["content"].asString();
 
   auto db = app().getDbClient();
@@ -70,5 +88,5 @@ void Community::create_post(
       [](const DrogonDbException& e) {
         LOG_ERROR << "Database error: " << e.base().what();
       },
-      userId, content);
+      user_id, content);
 }
