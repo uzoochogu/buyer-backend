@@ -346,5 +346,7 @@
         }
     ],
     //custom_config: custom configuration for users. This object can be get by the app().getCustomConfig() method. 
-    "custom_config": {}
+    "custom_config": {
+        "jwt_secret": "your_secure_random_production_secret"
+    }
 }

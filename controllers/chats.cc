@@ -51,7 +51,7 @@ void Chats::get_chats(const HttpRequestPtr& req,
 void Chats::send_chat(const HttpRequestPtr& req,
                       std::function<void(const HttpResponsePtr&)>&& callback) {
   auto json = req->getJsonObject();
-  int userId = (*json)["user_id"].asInt();
+  std::string userId = (*json)["user_id"].asString();
   std::string message = (*json)["message"].asString();
 
   auto db = app().getDbClient();
@@ -67,5 +67,5 @@ void Chats::send_chat(const HttpRequestPtr& req,
       [](const DrogonDbException& e) {
         LOG_ERROR << "Database error: " << e.base().what();
       },
-      userId, message);
+      std::stoi(userId), message);
 }

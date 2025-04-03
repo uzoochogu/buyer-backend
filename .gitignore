@@ -569,3 +569,8 @@ models/
 
 config.json
 models/model.json
+
+tools/
+scrap/
+.env
+.env.cmake
