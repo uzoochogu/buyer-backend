@@ -17,7 +17,7 @@ class Authentication : public drogon::HttpController<Authentication> {
   ADD_METHOD_TO(Authentication::logout, "/api/v1/auth/logout", Post, Options,
                 "CorsMiddleware", "AuthMiddleware");
   ADD_METHOD_TO(Authentication::refresh, "/api/v1/auth/refresh", Post, Options,
-                "CorsMiddleware");
+                "CorsMiddleware", "AuthMiddleware");
   ADD_METHOD_TO(Authentication::register_user, "/api/v1/auth/register", Post,
                 Options, "CorsMiddleware");
   METHOD_LIST_END

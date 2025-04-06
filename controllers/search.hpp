@@ -5,7 +5,6 @@
 // #include "../models/Orders.h"
 // #include "../models/Posts.h"
 
-
 using namespace drogon;
 
 namespace api {
@@ -14,7 +13,7 @@ class Search : public drogon::HttpController<Search> {
  public:
   METHOD_LIST_BEGIN
   ADD_METHOD_TO(Search::search, "/api/v1/search", Get, Options,
-                "CorsMiddleware");
+                "CorsMiddleware", "AuthMiddleware");
 
   METHOD_LIST_END
 

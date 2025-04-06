@@ -10,7 +10,7 @@ class Community : public drogon::HttpController<Community> {
  public:
   METHOD_LIST_BEGIN
   ADD_METHOD_TO(Community::get_posts, "/api/v1/posts", Get, Options,
-                "CorsMiddleware");
+                "CorsMiddleware", "AuthMiddleware");
   ADD_METHOD_TO(Community::create_post, "/api/v1/posts", Post, Options,
                 "CorsMiddleware", "AuthMiddleware");
   METHOD_LIST_END

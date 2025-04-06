@@ -23,7 +23,6 @@
 
 #include "../config/config.hpp"
 
-
 #define ARGON2_HASH_LEN 32
 #define ARGON2_SALT_LEN 16
 

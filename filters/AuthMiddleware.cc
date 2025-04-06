@@ -7,7 +7,6 @@
 
 #include "../config/config.hpp"
 
-
 using traits = jwt::traits::nlohmann_json;
 using namespace drogon;
 
@@ -67,8 +66,8 @@ class AuthMiddleware : public HttpMiddleware<AuthMiddleware> {
         }
       }
 
-      // req->setParameter("current_user_id", std::to_string(user_id));
-      req->setParameter("current_user_id", user_id);
+      // Pass user_id through request attributes
+      req->getAttributes()->insert("current_user_id", user_id);
 
       // Token is valid, proceed to the next middleware/controller
       nextCb(std::move(mcb));
