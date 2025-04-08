@@ -48,6 +48,51 @@ INSERT INTO posts (user_id, content) VALUES (1, 'First post!');
 
 INSERT INTO posts (user_id, content) VALUES (2, 'Hello world!');
 
-INSERT INTO chats (user_id, message) VALUES (1, 'Hi there!');
+-- Sample conversations
+INSERT INTO conversations (name) VALUES ('User1 and User2');
 
-INSERT INTO chats (user_id, message) VALUES (2, 'Hello!');
+-- Add participants to the conversation
+INSERT INTO
+    conversation_participants (conversation_id, user_id)
+VALUES (1, 1);
+
+INSERT INTO
+    conversation_participants (conversation_id, user_id)
+VALUES (1, 2);
+
+-- Sample messages
+INSERT INTO
+    messages (
+        conversation_id,
+        sender_id,
+        content
+    )
+VALUES (1, 1, 'Hi there!');
+
+INSERT INTO
+    messages (
+        conversation_id,
+        sender_id,
+        content
+    )
+VALUES (1, 2, 'Hello! How are you?');
+
+INSERT INTO
+    messages (
+        conversation_id,
+        sender_id,
+        content
+    )
+VALUES (
+        1,
+        1,
+        'I''m doing well, thanks for asking!'
+    );
+
+INSERT INTO
+    messages (
+        conversation_id,
+        sender_id,
+        content
+    )
+VALUES (1, 2, 'Great to hear that!');
