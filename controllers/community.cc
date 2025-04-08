@@ -72,7 +72,7 @@ void Community::create_post(
     const HttpRequestPtr& req,
     std::function<void(const HttpResponsePtr&)>&& callback) {
   auto json = req->getJsonObject();
-  int user_id = (*json)["user_id"].asInt();
+  std::string user_id = (*json)["user_id"].asString();
   std::string content = (*json)["content"].asString();
 
   auto db = app().getDbClient();
@@ -88,5 +88,5 @@ void Community::create_post(
       [](const DrogonDbException& e) {
         LOG_ERROR << "Database error: " << e.base().what();
       },
-      user_id, content);
+      std::stoi(user_id), content);
 }

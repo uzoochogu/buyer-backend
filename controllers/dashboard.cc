@@ -8,16 +8,9 @@
 #include <drogon/orm/Field.h>
 #include <drogon/orm/Mapper.h>
 #include <drogon/orm/Result.h>
+#include <drogon/orm/ResultIterator.h>
 #include <drogon/orm/Row.h>
 #include <drogon/orm/SqlBinder.h>
-
-// #include <drogon/orm/Transaction.h>
-#include <drogon/orm/ResultIterator.h>
-// #include <drogon/orm/ResultStream.h>
-// #include <drogon/orm/ResultStreamIterator.h>
-// #include <drogon/orm/ResultStreamRow.h>
-// #include <drogon/orm/ResultStreamField.h>
-// #include <drogon/orm/ResultStreamException.h>
 
 using namespace drogon;
 using namespace drogon::orm;

@@ -12,9 +12,9 @@ class Chats : public drogon::HttpController<Chats> {
  public:
   METHOD_LIST_BEGIN
   ADD_METHOD_TO(Chats::get_chats, "/api/v1/chats", Get, Options,
-                "CorsMiddleware");
+                "CorsMiddleware", "AuthMiddleware");
   ADD_METHOD_TO(Chats::send_chat, "/api/v1/chats", Post, Options,
-                "CorsMiddleware");
+                "CorsMiddleware", "AuthMiddleware");
   METHOD_LIST_END
 
   void get_chats(const HttpRequestPtr &req,

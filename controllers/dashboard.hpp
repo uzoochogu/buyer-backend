@@ -13,7 +13,7 @@ class Dashboard : public drogon::HttpController<Dashboard> {
  public:
   METHOD_LIST_BEGIN
   ADD_METHOD_TO(Dashboard::get_dashboard_data, "/api/v1/dashboard", Get,
-                Options, "CorsMiddleware");
+                Options, "CorsMiddleware", "AuthMiddleware");
   METHOD_LIST_END
 
   void get_dashboard_data(

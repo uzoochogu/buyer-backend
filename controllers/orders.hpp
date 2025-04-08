@@ -10,9 +10,9 @@ class Orders : public drogon::HttpController<Orders> {
  public:
   METHOD_LIST_BEGIN
   ADD_METHOD_TO(Orders::get_orders, "/api/v1/orders", Get, Options,
-                "CorsMiddleware");
+                "CorsMiddleware", "AuthMiddleware");
   ADD_METHOD_TO(Orders::create_order, "/api/v1/orders", Post, Options,
-                "CorsMiddleware");
+                "CorsMiddleware", "AuthMiddleware");
 
   METHOD_LIST_END
 
