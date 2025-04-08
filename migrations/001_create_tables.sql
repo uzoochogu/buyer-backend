@@ -32,9 +32,23 @@ CREATE TABLE posts (
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
-CREATE TABLE chats (
+CREATE TABLE conversations (
     id SERIAL PRIMARY KEY,
-    user_id INT REFERENCES users (id),
-    message TEXT NOT NULL,
+    name VARCHAR(100),
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE conversation_participants (
+    conversation_id INT REFERENCES conversations (id) ON DELETE CASCADE,
+    user_id INT REFERENCES users (id) ON DELETE CASCADE,
+    PRIMARY KEY (conversation_id, user_id)
+);
+
+CREATE TABLE messages (
+    id SERIAL PRIMARY KEY,
+    conversation_id INT REFERENCES conversations (id) ON DELETE CASCADE,
+    sender_id INT REFERENCES users (id) ON DELETE CASCADE,
+    content TEXT NOT NULL,
+    is_read BOOLEAN DEFAULT FALSE,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
