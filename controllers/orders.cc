@@ -46,7 +46,7 @@ void Orders::create_order(
     const HttpRequestPtr& req,
     std::function<void(const HttpResponsePtr&)>&& callback) {
   auto json = req->getJsonObject();
-  int userId = (*json)["user_id"].asInt();
+  int user_id = (*json)["user_id"].asInt();
   std::string status = (*json)["status"].asString();
 
   auto db = app().getDbClient();
@@ -69,5 +69,5 @@ void Orders::create_order(
         auto resp = HttpResponse::newHttpJsonResponse(ret);
         callback(resp);
       },
-      userId, status);
+      user_id, status);
 }

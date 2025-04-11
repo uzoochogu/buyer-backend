@@ -26,14 +26,14 @@ void Dashboard::get_dashboard_data(
   db->execSqlAsync(
       "SELECT status, COUNT(*) FROM orders GROUP BY status",
       [callback](const Result& result) {
-        Json::Value ordersData;
+        Json::Value orders_data;
         for (const auto& row : result) {
-          ordersData[row["status"].as<std::string>()] = row["count"].as<int>();
+          orders_data[row["status"].as<std::string>()] = row["count"].as<int>();
         }
 
         // Prepare response
         Json::Value ret;
-        ret["orders"] = ordersData;
+        ret["orders"] = orders_data;
         auto resp = HttpResponse::newHttpJsonResponse(ret);
         callback(resp);
       },

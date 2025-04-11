@@ -37,7 +37,7 @@ void Search::search(const HttpRequestPtr& req,
   db->execSqlAsync(
       "SELECT * FROM orders WHERE CAST(id AS TEXT) ILIKE $1 OR status ILIKE $1",
       [callback, query](const Result& ordersResult) {
-        Json::Value searchResults = Json::Value(Json::arrayValue);
+        Json::Value search_results = Json::Value(Json::arrayValue);
 
         LOG_DEBUG << "Found " << ordersResult.size()
                   << " matching orders for query: '" << query << "'";
@@ -48,15 +48,15 @@ void Search::search(const HttpRequestPtr& req,
           order["type"] = "Order";
           order["details"] = "Order #" + row["id"].as<std::string>() + " - " +
                              row["status"].as<std::string>();
-          searchResults.append(order);
+          search_results.append(order);
         }
 
         // Also search posts
         auto db = app().getDbClient();
         db->execSqlAsync(
             "SELECT * FROM posts WHERE content ILIKE $1",
-            [callback, searchResults, query](const Result& postsResult) {
-              Json::Value finalResults = searchResults;
+            [callback, search_results, query](const Result& postsResult) {
+              Json::Value finalResults = search_results;
 
               LOG_DEBUG << "Found " << postsResult.size()
                         << " matching posts for query: '" << query << "'";
@@ -77,10 +77,10 @@ void Search::search(const HttpRequestPtr& req,
               auto resp = HttpResponse::newHttpJsonResponse(finalResults);
               callback(resp);
             },
-            [callback, searchResults](const DrogonDbException& e) {
+            [callback, search_results](const DrogonDbException& e) {
               LOG_ERROR << "Database error searching posts: "
                         << e.base().what();
-              auto resp = HttpResponse::newHttpJsonResponse(searchResults);
+              auto resp = HttpResponse::newHttpJsonResponse(search_results);
               callback(resp);
             },
             "%" + query + "%");
