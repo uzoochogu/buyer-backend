@@ -2,8 +2,6 @@
 #include <drogon/HttpController.h>
 #include <drogon/orm/DbClient.h>
 
-#include "../models/Users.h"
-
 using namespace drogon;
 
 namespace api {

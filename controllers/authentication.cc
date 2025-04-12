@@ -33,7 +33,7 @@ using namespace api::v1;
 using traits = jwt::traits::nlohmann_json;
 
 // Helper function to generate a random string for tokens
-std::string generateRandomString(size_t length) {
+std::string generate_random_string(size_t length) {
   const std::string chars =
       "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz";
   std::random_device rd;
@@ -41,11 +41,11 @@ std::string generateRandomString(size_t length) {
   std::uniform_int_distribution<> distribution(
       0, static_cast<int>(chars.size() - 1));
 
-  std::string randomString;
+  std::string random_string;
   for (size_t i = 0; i < length; ++i) {
-    randomString += chars[distribution(generator)];
+    random_string += chars[distribution(generator)];
   }
-  return randomString;
+  return random_string;
 }
 
 // Helper function for base64 encoding
@@ -82,7 +82,7 @@ std::string base64_encode(const uint8_t* data, size_t length) {
 }
 
 // Helper function to generate JWT token
-std::string generateJWT(int userId, const std::string& username) {
+std::string generate_jwt(int user_id, const std::string& username) {
   const std::string secret = config::JWT_SECRET;
 
   // Current time and expiration time (1 hour from now)
@@ -96,7 +96,7 @@ std::string generateJWT(int userId, const std::string& username) {
           .set_issued_at(now)
           .set_expires_at(exp)
           .set_payload_claim("user_id",
-                             jwt::basic_claim<traits>(std::to_string(userId)))
+                             jwt::basic_claim<traits>(std::to_string(user_id)))
           .set_payload_claim("username", jwt::basic_claim<traits>(username))
           .sign(jwt::algorithm::hs256{secret});
 
@@ -104,10 +104,10 @@ std::string generateJWT(int userId, const std::string& username) {
 }
 
 // Helper function to generate refresh token
-std::string generateRefreshToken() { return generateRandomString(64); }
+std::string generate_refresh_token() { return generate_random_string(64); }
 
 // Helper function to hash password with Argon2
-std::string hashPasswordWithArgon2(const std::string& password) {
+std::string hash_password_with_argon2(const std::string& password) {
   // Generate a random salt
   uint8_t salt[ARGON2_SALT_LEN];
   std::random_device rd;
@@ -145,8 +145,8 @@ std::string hashPasswordWithArgon2(const std::string& password) {
 }
 
 // Helper function to verify password with Argon2
-bool verifyPasswordWithArgon2(const std::string& password,
-                              const std::string& hash) {
+bool verify_password_with_argon2(const std::string& password,
+                                 const std::string& hash) {
   // Format: $argon2id$v=19$m=65536,t=3,p=1$<salt>$<hash>
   // Parses and verifies parses encoded hash
   int result =
@@ -172,25 +172,26 @@ void Authentication::login(
       [callback, password](const Result& result) {
         if (result.size() > 0) {
           const auto& row = result[0];
-          int userId = row["id"].as<int>();
+          int user_id = row["id"].as<int>();
           std::string username = row["username"].as<std::string>();
           std::string storedHash = row["password_hash"].as<std::string>();
 
           // Verify password using Argon2
-          bool passwordMatches = verifyPasswordWithArgon2(password, storedHash);
+          bool passwordMatches =
+              verify_password_with_argon2(password, storedHash);
 
           if (passwordMatches) {
             // Generate JWT token
-            std::string token = generateJWT(userId, username);
+            std::string token = generate_jwt(user_id, username);
 
             // Generate refresh token
-            std::string refreshToken = generateRefreshToken();
+            std::string refreshToken = generate_refresh_token();
 
             // Store refresh token in database
             auto db = app().getDbClient();
             auto expiry = std::chrono::system_clock::now() +
                           std::chrono::hours(24 * 7);  // 1 week
-            auto expiryTime = std::chrono::system_clock::to_time_t(expiry);
+            auto expiry_time = std::chrono::system_clock::to_time_t(expiry);
 
             db->execSqlAsync(
                 "INSERT INTO user_sessions (user_id, token, refresh_token, "
@@ -201,14 +202,14 @@ void Authentication::login(
                 [](const DrogonDbException& e) {
                   LOG_ERROR << "Failed to store session: " << e.base().what();
                 },
-                userId, token, refreshToken, static_cast<double>(expiryTime));
+                user_id, token, refreshToken, static_cast<double>(expiry_time));
 
             // Return success with tokens
             Json::Value ret;
             ret["status"] = "success";
             ret["token"] = token;
             ret["refresh_token"] = refreshToken;
-            ret["user_id"] = userId;
+            ret["user_id"] = user_id;
             ret["username"] = username;
 
             auto resp = HttpResponse::newHttpJsonResponse(ret);
@@ -305,7 +306,7 @@ void Authentication::refresh(
       [callback, refreshToken, db](const Result& result) {
         if (result.size() > 0) {
           const auto& row = result[0];
-          int userId = row["user_id"].as<int>();
+          int user_id = row["user_id"].as<int>();
 
           // Check if refresh token has expired
           auto expiryStr = row["expires_at"].as<std::string>();
@@ -321,35 +322,35 @@ void Authentication::refresh(
           // Get username for the token
           db->execSqlAsync(
               "SELECT username FROM users WHERE id = $1",
-              [callback, userId, refreshToken, db](const Result& userResult) {
+              [callback, user_id, refreshToken, db](const Result& userResult) {
                 if (userResult.size() > 0) {
                   std::string username =
                       userResult[0]["username"].as<std::string>();
 
                   // Generate new JWT token
-                  std::string newToken = generateJWT(userId, username);
+                  std::string newToken = generate_jwt(user_id, username);
 
                   // Generate new refresh token
-                  std::string newRefreshToken = generateRefreshToken();
+                  std::string newRefreshToken = generate_refresh_token();
 
                   // Update session in database
                   auto expiry = std::chrono::system_clock::now() +
                                 std::chrono::hours(24 * 7);  // 1 week
-                  auto expiryTime =
+                  auto expiry_time =
                       std::chrono::system_clock::to_time_t(expiry);
 
                   db->execSqlAsync(
                       "UPDATE user_sessions SET token = $1, refresh_token = "
                       "$2, expires_at = to_timestamp($3) WHERE refresh_token = "
                       "$4",
-                      [callback, userId, username, newToken,
+                      [callback, user_id, username, newToken,
                        newRefreshToken](const Result& updateResult) {
                         // Return success with new tokens
                         Json::Value ret;
                         ret["status"] = "success";
                         ret["token"] = newToken;
                         ret["refresh_token"] = newRefreshToken;
-                        ret["user_id"] = userId;
+                        ret["user_id"] = user_id;
                         ret["username"] = username;
 
                         auto resp = HttpResponse::newHttpJsonResponse(ret);
@@ -366,7 +367,7 @@ void Authentication::refresh(
                         callback(resp);
                       },
                       newToken, newRefreshToken,
-                      static_cast<double>(expiryTime), refreshToken);
+                      static_cast<double>(expiry_time), refreshToken);
                 } else {
                   // User not found
                   Json::Value ret;
@@ -386,7 +387,7 @@ void Authentication::refresh(
                 resp->setStatusCode(k500InternalServerError);
                 callback(resp);
               },
-              userId);
+              user_id);
         } else {
           // Refresh token not found
           Json::Value ret;
@@ -429,9 +430,9 @@ void Authentication::register_user(
   }
 
   // Hash password with Argon2
-  std::string passwordHash;
+  std::string password_hash;
   try {
-    passwordHash = hashPasswordWithArgon2(password);
+    password_hash = hash_password_with_argon2(password);
   } catch (const std::exception& e) {
     LOG_ERROR << "Failed to hash password: " << e.what();
     Json::Value ret;
@@ -448,7 +449,7 @@ void Authentication::register_user(
   // Check if username or email already exists
   db->execSqlAsync(
       "SELECT id FROM users WHERE username = $1 OR email = $2",
-      [callback, db, username, email, passwordHash](const Result& result) {
+      [callback, db, username, email, password_hash](const Result& result) {
         if (result.size() > 0) {
           // Username or email already exists
           Json::Value ret;
@@ -462,35 +463,35 @@ void Authentication::register_user(
           db->execSqlAsync(
               "INSERT INTO users (username, email, password_hash) VALUES ($1, "
               "$2, $3) RETURNING id",
-              [callback, username, passwordHash](const Result& insertResult) {
-                if (insertResult.size() > 0) {
-                  int userId = insertResult[0]["id"].as<int>();
+              [callback, username, password_hash](const Result& insert_result) {
+                if (insert_result.size() > 0) {
+                  int user_id = insert_result[0]["id"].as<int>();
 
                   // Generate JWT token
-                  std::string token = generateJWT(userId, username);
+                  std::string token = generate_jwt(user_id, username);
 
                   // Generate refresh token
-                  std::string refreshToken = generateRefreshToken();
+                  std::string refreshToken = generate_refresh_token();
 
                   // Store refresh token in database
                   auto db = app().getDbClient();
                   auto expiry = std::chrono::system_clock::now() +
                                 std::chrono::hours(24 * 7);  // 1 week
-                  auto expiryTime =
+                  auto expiry_time =
                       std::chrono::system_clock::to_time_t(expiry);
 
                   db->execSqlAsync(
                       "INSERT INTO user_sessions (user_id, token, "
                       "refresh_token, expires_at) VALUES ($1, $2, $3, "
                       "to_timestamp($4))",
-                      [callback, userId, username, token,
-                       refreshToken](const Result& sessionResult) {
+                      [callback, user_id, username, token,
+                       refreshToken](const Result& session_result) {
                         // Return success with tokens
                         Json::Value ret;
                         ret["status"] = "success";
                         ret["token"] = token;
                         ret["refresh_token"] = refreshToken;
-                        ret["user_id"] = userId;
+                        ret["user_id"] = user_id;
                         ret["username"] = username;
 
                         auto resp = HttpResponse::newHttpJsonResponse(ret);
@@ -507,8 +508,8 @@ void Authentication::register_user(
                         resp->setStatusCode(k500InternalServerError);
                         callback(resp);
                       },
-                      userId, token, refreshToken,
-                      static_cast<double>(expiryTime));
+                      user_id, token, refreshToken,
+                      static_cast<double>(expiry_time));
                 } else {
                   // Failed to create user
                   Json::Value ret;
@@ -528,7 +529,7 @@ void Authentication::register_user(
                 resp->setStatusCode(k500InternalServerError);
                 callback(resp);
               },
-              username, email, passwordHash);
+              username, email, password_hash);
         }
       },
       [callback](const DrogonDbException& e) {
