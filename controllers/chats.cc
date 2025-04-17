@@ -12,7 +12,6 @@
 #include <drogon/orm/Row.h>
 #include <drogon/orm/SqlBinder.h>
 
-
 using namespace drogon;
 using namespace drogon::orm;
 
