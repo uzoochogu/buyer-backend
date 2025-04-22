@@ -189,7 +189,7 @@ void Chats::get_messages(const HttpRequestPtr& req,
         // Get messages for the conversation
         db->execSqlAsync(
             "SELECT m.id, m.sender_id, u.username as sender_name, m.content, "
-            "m.is_read, m.created_at "
+            "m.is_read, m.created_at, m.metadata "
             "FROM messages m "
             "JOIN users u ON m.sender_id = u.id "
             "WHERE m.conversation_id = $1 "
@@ -204,6 +204,7 @@ void Chats::get_messages(const HttpRequestPtr& req,
                 message["content"] = row["content"].as<std::string>();
                 message["is_read"] = row["is_read"].as<bool>();
                 message["created_at"] = row["created_at"].as<std::string>();
+                message["metadata"] = row["metadata"].as<std::string>();
                 messages.append(message);
               }
 
@@ -300,4 +301,140 @@ void Chats::send_message(const HttpRequestPtr& req,
         callback(resp);
       },
       std::stoi(conversation_id), std::stoi(user_id));
+}
+
+// Get conversation by offer ID
+void Chats::get_conversation_by_offer(
+    const HttpRequestPtr& req,
+    std::function<void(const HttpResponsePtr&)>&& callback,
+    const std::string& offer_id) {
+  std::string current_user_id =
+      req->getAttributes()->get<std::string>("current_user_id");
+  auto db = app().getDbClient();
+
+  // First, check if the user is authorized to access this offer's conversation
+  db->execSqlAsync(
+      "SELECT o.*, p.user_id AS post_user_id "
+      "FROM offers o "
+      "JOIN posts p ON o.post_id = p.id "
+      "WHERE o.id = $1",
+      [=](const Result& result) {
+        if (result.size() == 0) {
+          Json::Value error;
+          error["error"] = "Offer not found";
+          auto resp = HttpResponse::newHttpJsonResponse(error);
+          resp->setStatusCode(k404NotFound);
+          callback(resp);
+          return;
+        }
+
+        int offer_user_id = result[0]["user_id"].as<int>();
+        int post_user_id = result[0]["post_user_id"].as<int>();
+
+        // Only offer creator or post owner can access the conversation
+        if (std::stoi(current_user_id) != offer_user_id &&
+            std::stoi(current_user_id) != post_user_id) {
+          Json::Value error;
+          error["error"] = "Unauthorized";
+          auto resp = HttpResponse::newHttpJsonResponse(error);
+          resp->setStatusCode(k403Forbidden);
+          callback(resp);
+          return;
+        }
+
+        // Find conversation between these two users
+        db->execSqlAsync(
+            "SELECT c.id FROM conversations c "
+            "JOIN conversation_participants cp1 ON c.id = cp1.conversation_id "
+            "JOIN conversation_participants cp2 ON c.id = cp2.conversation_id "
+            "WHERE cp1.user_id = $1 AND cp2.user_id = $2 "
+            "LIMIT 1",
+            [=](const Result& convResult) {
+              if (convResult.size() == 0) {
+                // No conversation exists yet, create one
+                db->execSqlAsync(
+                    "INSERT INTO conversations (name) VALUES ($1) RETURNING id",
+                    [=](const Result& newConvResult) {
+                      if (newConvResult.size() == 0) {
+                        Json::Value error;
+                        error["error"] = "Failed to create conversation";
+                        auto resp = HttpResponse::newHttpJsonResponse(error);
+                        resp->setStatusCode(k500InternalServerError);
+                        callback(resp);
+                        return;
+                      }
+
+                      int conversation_id = newConvResult[0]["id"].as<int>();
+
+                      // Add participants
+                      db->execSqlAsync(
+                          "INSERT INTO conversation_participants "
+                          "(conversation_id, user_id) VALUES ($1, $2), ($1, "
+                          "$3)",
+                          [=](const Result&) {
+                            Json::Value response;
+                            response["status"] = "success";
+                            response["conversation_id"] = conversation_id;
+                            response["is_new"] = true;
+
+                            auto resp =
+                                HttpResponse::newHttpJsonResponse(response);
+                            callback(resp);
+                          },
+                          [=](const DrogonDbException& e) {
+                            Json::Value error;
+                            error["error"] = "Database error: " +
+                                             std::string(e.base().what());
+                            auto resp =
+                                HttpResponse::newHttpJsonResponse(error);
+                            resp->setStatusCode(k500InternalServerError);
+                            callback(resp);
+                          },
+                          conversation_id, std::stoi(current_user_id),
+                          (std::stoi(current_user_id) == offer_user_id
+                               ? post_user_id
+                               : offer_user_id));
+                    },
+                    [=](const DrogonDbException& e) {
+                      Json::Value error;
+                      error["error"] =
+                          "Database error: " + std::string(e.base().what());
+                      auto resp = HttpResponse::newHttpJsonResponse(error);
+                      resp->setStatusCode(k500InternalServerError);
+                      callback(resp);
+                    },
+                    "Offer #" + offer_id + " Conversation");
+              } else {
+                // Conversation exists, return its ID
+                int conversation_id = convResult[0]["id"].as<int>();
+
+                Json::Value response;
+                response["status"] = "success";
+                response["conversation_id"] = conversation_id;
+                response["is_new"] = false;
+
+                auto resp = HttpResponse::newHttpJsonResponse(response);
+                callback(resp);
+              }
+            },
+            [=](const DrogonDbException& e) {
+              Json::Value error;
+              error["error"] =
+                  "Database error: " + std::string(e.base().what());
+              auto resp = HttpResponse::newHttpJsonResponse(error);
+              resp->setStatusCode(k500InternalServerError);
+              callback(resp);
+            },
+            std::stoi(current_user_id),
+            (std::stoi(current_user_id) == offer_user_id ? post_user_id
+                                                         : offer_user_id));
+      },
+      [=](const DrogonDbException& e) {
+        Json::Value error;
+        error["error"] = "Database error: " + std::string(e.base().what());
+        auto resp = HttpResponse::newHttpJsonResponse(error);
+        resp->setStatusCode(k500InternalServerError);
+        callback(resp);
+      },
+      std::stoi(offer_id));
 }

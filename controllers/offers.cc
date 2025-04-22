@@ -69,6 +69,7 @@ void Offers::get_offers_for_post(
                   offer["title"] = row["title"].as<std::string>();
                   offer["description"] = row["description"].as<std::string>();
                   offer["price"] = row["price"].as<double>();
+                  offer["original_price"] = row["original_price"].as<double>();
                   offer["is_public"] = row["is_public"].as<bool>();
                   offer["status"] = row["status"].as<std::string>();
                   offer["created_at"] = row["created_at"].as<std::string>();
@@ -192,8 +193,8 @@ void Offers::create_offer(
         // Insert the offer
         db->execSqlAsync(
             "INSERT INTO offers (post_id, user_id, title, description, price, "
-            "is_public, status) "
-            "VALUES ($1, $2, $3, $4, $5, $6, 'pending') "
+            "original_price, is_public, status) "
+            "VALUES ($1, $2, $3, $4, $5, $6, $7, 'pending') "
             "RETURNING id, created_at",
             [callback, db, post_user_id](const Result& insert_result) {
               if (insert_result.size() > 0) {
@@ -238,7 +239,8 @@ void Offers::create_offer(
               resp->setStatusCode(k500InternalServerError);
               callback(resp);
             },
-            post_id, current_user_id, title, description, price, is_public);
+            post_id, current_user_id, title, description, price, price,
+            is_public);
       },
       [callback](const DrogonDbException& e) {
         LOG_ERROR << "Database error: " << e.base().what();
@@ -302,6 +304,7 @@ void Offers::get_offer(const HttpRequestPtr& req,
         offer["title"] = row["title"].as<std::string>();
         offer["description"] = row["description"].as<std::string>();
         offer["price"] = row["price"].as<double>();
+        offer["original_price"] = row["original_price"].as<double>();
         offer["is_public"] = is_public;
         offer["status"] = row["status"].as<std::string>();
         offer["created_at"] = row["created_at"].as<std::string>();
@@ -427,6 +430,55 @@ void Offers::update_offer(
       id);
 }
 
+// Helper function to update message metadata when an offer or negotiation
+// status changes
+void update_message_metadata(std::shared_ptr<Transaction> transaction,
+                             const std::string& id,
+                             const std::string& new_status,
+                             bool is_negotiation = false) {
+  if (is_negotiation) {
+    LOG_INFO << "Updating message metadata for price negotiation: " << id
+             << " to status: " << new_status;
+
+    transaction->execSqlAsync(
+        "UPDATE messages "
+        "SET metadata = jsonb_set(metadata, '{offer_status}', '\"" +
+            new_status +
+            "\"') "
+            "WHERE context_id = $1 AND context_type = 'negotiation'",
+        [=](const Result& result) {
+          LOG_INFO << "Price negotiation message metadata updated successfully "
+                      "for ID "
+                   << id << " (rows affected: " << result.affectedRows() << ")";
+        },
+        [=](const DrogonDbException& e) {
+          LOG_ERROR << "Database error updating price negotiation message "
+                       "metadata for ID "
+                    << id << ": " << e.base().what();
+        },
+        id);
+  } else {
+    LOG_INFO << "Updating message metadata for offer: " << id
+             << " to status: " << new_status;
+
+    transaction->execSqlAsync(
+        "UPDATE messages "
+        "SET metadata = jsonb_set(metadata, '{offer_status}', '\"" +
+            new_status +
+            "\"') "
+            "WHERE metadata->>'offer_id' = $1 AND context_type = 'negotiation'",
+        [=](const Result& result) {
+          LOG_INFO << "Message metadata updated successfully for offer ID "
+                   << id << " (rows affected: " << result.affectedRows() << ")";
+        },
+        [=](const DrogonDbException& e) {
+          LOG_ERROR << "Database error updating message metadata for offer ID "
+                    << id << ": " << e.base().what();
+        },
+        id);
+  }
+}
+
 // Accept an offer
 void Offers::accept_offer(
     const HttpRequestPtr& req,
@@ -494,36 +546,672 @@ void Offers::accept_offer(
               "UPDATE offers SET status = 'accepted', updated_at = NOW() WHERE "
               "id = $1",
               [callback, trans, post_id, id](const Result& result) {
-                // Reject all other offers for this post
+                // Update message metadata for the accepted offer
+                update_message_metadata(trans, id, "accepted");
+
+                // Get the latest price negotiation for this offer (if any) and
+                // accept it
                 trans->execSqlAsync(
-                    "UPDATE offers SET status = 'rejected', updated_at = NOW() "
-                    "WHERE post_id = $1 AND id != $2 AND status = 'pending'",
-                    [callback, trans, post_id](const Result& result) {
-                      // Update post status to reflect that an offer was
-                      // accepted
-                      trans->execSqlAsync(
-                          "UPDATE posts SET request_status = 'fulfilled' WHERE "
-                          "id = $1",
-                          [callback, trans](const Result& result) {
-                            // Commit the transaction
-                            trans->setCommitCallback([callback](
-                                                         bool committed) {
-                              if (committed) {
-                                Json::Value ret;
-                                ret["status"] = "success";
-                                ret["message"] = "Offer accepted successfully";
-                                auto resp =
-                                    HttpResponse::newHttpJsonResponse(ret);
-                                callback(resp);
-                              } else {
-                                Json::Value error;
-                                error["error"] = "Failed to commit transaction";
-                                auto resp =
-                                    HttpResponse::newHttpJsonResponse(error);
-                                resp->setStatusCode(k500InternalServerError);
-                                callback(resp);
+                    "SELECT id FROM price_negotiations "
+                    "WHERE offer_id = $1 AND status = 'pending' "
+                    "ORDER BY created_at DESC LIMIT 1",
+                    [callback, trans, post_id,
+                     id](const Result& negotiation_result) {
+                      // If there are pending negotiations, accept the latest
+                      // one and reject others
+                      if (negotiation_result.size() > 0) {
+                        int latest_negotiation_id =
+                            negotiation_result[0]["id"].as<int>();
+                        std::string negotiation_id_str =
+                            std::to_string(latest_negotiation_id);
+
+                        // Accept the latest negotiation
+                        trans->execSqlAsync(
+                            "UPDATE price_negotiations "
+                            "SET status = 'accepted', updated_at = NOW() "
+                            "WHERE id = $1",
+                            [callback, trans, post_id, id,
+                             negotiation_id_str](const Result&) {
+                              // Update message metadata for the accepted
+                              // negotiation
+                              update_message_metadata(trans, negotiation_id_str,
+                                                      "accepted", true);
+
+                              // Reject all other negotiations for this offer
+                              trans->execSqlAsync(
+                                  "UPDATE price_negotiations "
+                                  "SET status = 'rejected', updated_at = NOW() "
+                                  "WHERE offer_id = $1 AND id != $2 AND status "
+                                  "= 'pending' "
+                                  "RETURNING id",
+                                  [callback, trans, post_id, id](
+                                      const Result& other_negotiations_result) {
+                                    LOG_INFO << "other_negotiations_result: "
+                                             << other_negotiations_result.size()
+                                             << "\n";
+                                    // Update message metadata for rejected
+                                    // negotiations
+                                    for (const auto& row :
+                                         other_negotiations_result) {
+                                      std::string rejected_negotiation_id =
+                                          std::to_string(row["id"].as<int>());
+                                      update_message_metadata(
+                                          trans, rejected_negotiation_id,
+                                          "rejected", true);
+                                    }
+
+                                    // Continue with rejecting other offers
+                                    trans->execSqlAsync(
+                                        "UPDATE offers SET status = "
+                                        "'rejected', updated_at = NOW() "
+                                        "WHERE post_id = $1 AND id != $2 AND "
+                                        "status = 'pending'",
+                                        [callback, trans, post_id,
+                                         id](const Result& result) {
+                                          // Update message metadata for all
+                                          // rejected offers
+                                          for (const auto& row : result) {
+                                            std::string rejected_offer_id =
+                                                std::to_string(
+                                                    row["id"].as<int>());
+                                            update_message_metadata(
+                                                trans, rejected_offer_id,
+                                                "rejected");
+                                          }
+
+                                          // Reject all pending price
+                                          // negotiations for other offers
+                                          trans->execSqlAsync(
+                                              "UPDATE price_negotiations pn "
+                                              "SET status = 'rejected', "
+                                              "updated_at = NOW() "
+                                              "FROM offers o "
+                                              "WHERE pn.offer_id = o.id AND "
+                                              "o.post_id = $1 AND "
+                                              "o.id != $2 AND pn.status = "
+                                              "'pending' "
+                                              "RETURNING pn.id",
+                                              [callback, trans, post_id](
+                                                  const Result&
+                                                      rejected_negotiations_result) {
+                                                // Update message metadata for
+                                                // rejected negotiations from
+                                                // other offers
+                                                for (
+                                                    const auto& row :
+                                                    rejected_negotiations_result) {
+                                                  std::string
+                                                      rejected_negotiation_id =
+                                                          std::to_string(
+                                                              row["id"]
+                                                                  .as<int>());
+                                                  update_message_metadata(
+                                                      trans,
+                                                      rejected_negotiation_id,
+                                                      "rejected", true);
+                                                }
+
+                                                // Update post status to reflect
+                                                // that an offer was accepted
+                                                trans->execSqlAsync(
+                                                    "UPDATE posts SET "
+                                                    "request_status = "
+                                                    "'fulfilled' WHERE "
+                                                    "id = $1",
+                                                    [callback, trans](
+                                                        const Result& result) {
+                                                      // Commit the transaction
+                                                      trans->setCommitCallback(
+                                                          [callback](
+                                                              bool committed) {
+                                                            if (committed) {
+                                                              Json::Value ret;
+                                                              ret["status"] =
+                                                                  "success";
+                                                              ret["message"] =
+                                                                  "Offer "
+                                                                  "accepted "
+                                                                  "successfull"
+                                                                  "y";
+                                                              auto resp =
+                                                                  HttpResponse::
+                                                                      newHttpJsonResponse(
+                                                                          ret);
+                                                              callback(resp);
+                                                            } else {
+                                                              Json::Value error;
+                                                              error["error"] =
+                                                                  "Failed to "
+                                                                  "commit "
+                                                                  "transaction";
+                                                              auto resp =
+                                                                  HttpResponse::
+                                                                      newHttpJsonResponse(
+                                                                          error);
+                                                              resp->setStatusCode(
+                                                                  k500InternalServerError);
+                                                              callback(resp);
+                                                            }
+                                                          });
+                                                    },
+                                                    [callback, trans](
+                                                        const DrogonDbException&
+                                                            e) {
+                                                      LOG_ERROR
+                                                          << "Database error: "
+                                                          << e.base().what();
+                                                      trans->rollback();
+                                                      Json::Value error;
+                                                      error["error"] =
+                                                          "Database error";
+                                                      auto resp = HttpResponse::
+                                                          newHttpJsonResponse(
+                                                              error);
+                                                      resp->setStatusCode(
+                                                          k500InternalServerError);
+                                                      callback(resp);
+                                                    },
+                                                    post_id);
+                                              },
+                                              [callback, trans](
+                                                  const DrogonDbException& e) {
+                                                LOG_ERROR << "Database error: "
+                                                          << e.base().what();
+                                                trans->rollback();
+                                                Json::Value error;
+                                                error["error"] =
+                                                    "Database error";
+                                                auto resp = HttpResponse::
+                                                    newHttpJsonResponse(error);
+                                                resp->setStatusCode(
+                                                    k500InternalServerError);
+                                                callback(resp);
+                                              },
+                                              post_id, id);
+                                        },
+                                        [callback,
+                                         trans](const DrogonDbException& e) {
+                                          LOG_ERROR << "Database error: "
+                                                    << e.base().what();
+                                          trans->rollback();
+                                          Json::Value error;
+                                          error["error"] = "Database error";
+                                          auto resp =
+                                              HttpResponse::newHttpJsonResponse(
+                                                  error);
+                                          resp->setStatusCode(
+                                              k500InternalServerError);
+                                          callback(resp);
+                                        },
+                                        post_id, id);
+                                  },
+                                  [callback,
+                                   trans](const DrogonDbException& e) {
+                                    LOG_ERROR << "Database error: "
+                                              << e.base().what();
+                                    trans->rollback();
+                                    Json::Value error;
+                                    error["error"] = "Database error";
+                                    auto resp =
+                                        HttpResponse::newHttpJsonResponse(
+                                            error);
+                                    resp->setStatusCode(
+                                        k500InternalServerError);
+                                    callback(resp);
+                                  },
+                                  id, negotiation_id_str);
+                            },
+                            [callback, trans](const DrogonDbException& e) {
+                              LOG_ERROR << "Database error: "
+                                        << e.base().what();
+                              trans->rollback();
+                              Json::Value error;
+                              error["error"] = "Database error";
+                              auto resp =
+                                  HttpResponse::newHttpJsonResponse(error);
+                              resp->setStatusCode(k500InternalServerError);
+                              callback(resp);
+                            },
+                            negotiation_id_str);
+                      } else {
+                        // No pending negotiations, just reject other offers
+                        trans->execSqlAsync(
+                            "UPDATE offers SET status = 'rejected', updated_at "
+                            "= NOW() "
+                            "WHERE post_id = $1 AND id != $2 AND status = "
+                            "'pending' RETURNING id",
+                            [callback, trans, post_id,
+                             id](const Result& result) {
+                              // Update message metadata for all rejected offers
+                              for (const auto& row : result) {
+                                std::string rejected_offer_id =
+                                    std::to_string(row["id"].as<int>());
+                                update_message_metadata(
+                                    trans, rejected_offer_id, "rejected");
                               }
-                            });
+
+                              // Reject all pending price negotiations for other
+                              // offers
+                              trans->execSqlAsync(
+                                  "UPDATE price_negotiations pn "
+                                  "SET status = 'rejected', updated_at = NOW() "
+                                  "FROM offers o "
+                                  "WHERE pn.offer_id = o.id AND o.post_id = $1 "
+                                  "AND "
+                                  "o.id != $2 AND pn.status = 'pending' "
+                                  "RETURNING pn.id",
+                                  [callback, trans,
+                                   post_id](const Result&
+                                                rejected_negotiations_result) {
+                                    // Update message metadata for rejected
+                                    // negotiations
+                                    for (const auto& row :
+                                         rejected_negotiations_result) {
+                                      std::string rejected_negotiation_id =
+                                          std::to_string(row["id"].as<int>());
+                                      update_message_metadata(
+                                          trans, rejected_negotiation_id,
+                                          "rejected", true);
+                                    }
+
+                                    // Update post status to reflect that an
+                                    // offer was accepted
+                                    trans->execSqlAsync(
+                                        "UPDATE posts SET request_status = "
+                                        "'fulfilled' WHERE "
+                                        "id = $1",
+                                        [callback,
+                                         trans](const Result& result) {
+                                          // Commit the transaction
+                                          trans->setCommitCallback(
+                                              [callback](bool committed) {
+                                                if (committed) {
+                                                  Json::Value ret;
+                                                  ret["status"] = "success";
+                                                  ret["message"] =
+                                                      "Offer accepted "
+                                                      "successfully";
+                                                  auto resp = HttpResponse::
+                                                      newHttpJsonResponse(ret);
+                                                  callback(resp);
+                                                } else {
+                                                  Json::Value error;
+                                                  error["error"] =
+                                                      "Failed to commit "
+                                                      "transaction";
+                                                  auto resp = HttpResponse::
+                                                      newHttpJsonResponse(
+                                                          error);
+                                                  resp->setStatusCode(
+                                                      k500InternalServerError);
+                                                  callback(resp);
+                                                }
+                                              });
+                                        },
+                                        [callback,
+                                         trans](const DrogonDbException& e) {
+                                          LOG_ERROR << "Database error: "
+                                                    << e.base().what();
+                                          trans->rollback();
+                                          Json::Value error;
+                                          error["error"] = "Database error";
+                                          auto resp =
+                                              HttpResponse::newHttpJsonResponse(
+                                                  error);
+                                          resp->setStatusCode(
+                                              k500InternalServerError);
+                                          callback(resp);
+                                        },
+                                        post_id);
+                                  },
+                                  [callback,
+                                   trans](const DrogonDbException& e) {
+                                    LOG_ERROR << "Database error: "
+                                              << e.base().what();
+                                    trans->rollback();
+                                    Json::Value error;
+                                    error["error"] = "Database error";
+                                    auto resp =
+                                        HttpResponse::newHttpJsonResponse(
+                                            error);
+                                    resp->setStatusCode(
+                                        k500InternalServerError);
+                                    callback(resp);
+                                  },
+                                  post_id, id);
+                            },
+                            [callback, trans](const DrogonDbException& e) {
+                              LOG_ERROR << "Database error: "
+                                        << e.base().what();
+                              trans->rollback();
+                              Json::Value error;
+                              error["error"] = "Database error";
+                              auto resp =
+                                  HttpResponse::newHttpJsonResponse(error);
+                              resp->setStatusCode(k500InternalServerError);
+                              callback(resp);
+                            },
+                            post_id, id);
+                      }
+                    },
+                    [callback, trans](const DrogonDbException& e) {
+                      LOG_ERROR << "Database error: " << e.base().what();
+                      trans->rollback();
+                      Json::Value error;
+                      error["error"] = "Database error";
+                      auto resp = HttpResponse::newHttpJsonResponse(error);
+                      resp->setStatusCode(k500InternalServerError);
+                      callback(resp);
+                    },
+                    id);
+              },
+              [callback, trans](const DrogonDbException& e) {
+                LOG_ERROR << "Database error: " << e.base().what();
+                trans->rollback();
+                Json::Value error;
+                error["error"] = "Database error";
+                auto resp = HttpResponse::newHttpJsonResponse(error);
+                resp->setStatusCode(k500InternalServerError);
+                callback(resp);
+              },
+              id);
+        });
+      },
+      [callback](const DrogonDbException& e) {
+        LOG_ERROR << "Database error: " << e.base().what();
+        Json::Value error;
+        error["error"] = "Database error";
+        auto resp = HttpResponse::newHttpJsonResponse(error);
+        resp->setStatusCode(k500InternalServerError);
+        callback(resp);
+      },
+      id);
+}
+
+// Accept a counter offer (for offer creators)
+void Offers::accept_counter_offer(
+    const HttpRequestPtr& req,
+    std::function<void(const HttpResponsePtr&)>&& callback,
+    const std::string& id) {
+  std::string current_user_id =
+      req->getAttributes()->get<std::string>("current_user_id");
+
+  auto db = app().getDbClient();
+
+  // First check if the user is the creator of the offer
+  db->execSqlAsync(
+      "SELECT o.user_id, o.post_id, p.user_id as post_owner_id, o.status "
+      "FROM offers o "
+      "JOIN posts p ON o.post_id = p.id "
+      "WHERE o.id = $1",
+      [callback, db, id, current_user_id](const Result& result) {
+        if (result.size() == 0) {
+          Json::Value error;
+          error["error"] = "Offer not found";
+          auto resp = HttpResponse::newHttpJsonResponse(error);
+          resp->setStatusCode(k404NotFound);
+          callback(resp);
+          return;
+        }
+
+        int offer_user_id = result[0]["user_id"].as<int>();
+        int post_owner_id = result[0]["post_owner_id"].as<int>();
+        int post_id = result[0]["post_id"].as<int>();
+        std::string status = result[0]["status"].as<std::string>();
+
+        // Check if user has permission to accept this counter-offer
+        if (offer_user_id != std::stoi(current_user_id)) {
+          Json::Value error;
+          error["error"] = "Only the offer creator can accept counter-offers";
+          auto resp = HttpResponse::newHttpJsonResponse(error);
+          resp->setStatusCode(k403Forbidden);
+          callback(resp);
+          return;
+        }
+
+        // Check if offer can be accepted (only pending offers can be accepted)
+        if (status != "pending") {
+          Json::Value error;
+          error["error"] = "Only pending offers can be accepted";
+          auto resp = HttpResponse::newHttpJsonResponse(error);
+          resp->setStatusCode(k400BadRequest);
+          callback(resp);
+          return;
+        }
+
+        // Create a transaction to handle all the updates atomically
+        db->newTransactionAsync([callback, id, post_id](
+                                    const std::shared_ptr<Transaction>& trans) {
+          if (!trans) {
+            Json::Value error;
+            error["error"] = "Failed to create transaction";
+            auto resp = HttpResponse::newHttpJsonResponse(error);
+            resp->setStatusCode(k500InternalServerError);
+            callback(resp);
+            return;
+          }
+
+          // First, get the latest negotiated price and its ID
+          trans->execSqlAsync(
+              "SELECT id, proposed_price FROM price_negotiations "
+              "WHERE offer_id = $1 AND status = 'pending' "
+              "ORDER BY created_at DESC LIMIT 1",
+              [callback, trans, post_id, id](const Result& price_result) {
+                if (price_result.size() == 0) {
+                  trans->rollback();
+                  Json::Value error;
+                  error["error"] = "No pending negotiations found";
+                  auto resp = HttpResponse::newHttpJsonResponse(error);
+                  resp->setStatusCode(k400BadRequest);
+                  callback(resp);
+                  return;
+                }
+
+                int latest_negotiation_id = price_result[0]["id"].as<int>();
+                std::string negotiation_id_str =
+                    std::to_string(latest_negotiation_id);
+                double latest_price =
+                    price_result[0]["proposed_price"].as<double>();
+
+                // Update the accepted offer with the latest negotiated price
+                trans->execSqlAsync(
+                    "UPDATE offers SET status = 'accepted', price = $2, "
+                    "updated_at = NOW() WHERE "
+                    "id = $1",
+                    [callback, trans, post_id, id, latest_price,
+                     negotiation_id_str](const Result& result) {
+                      // Update message metadata for the accepted offer
+                      update_message_metadata(trans, id, "accepted");
+
+                      // Accept only the latest negotiation
+                      trans->execSqlAsync(
+                          "UPDATE price_negotiations "
+                          "SET status = 'accepted', updated_at = NOW() "
+                          "WHERE id = $1",
+                          [callback, trans, post_id, id,
+                           negotiation_id_str](const Result& result) {
+                            // Update message metadata for the accepted
+                            // negotiation
+                            update_message_metadata(trans, negotiation_id_str,
+                                                    "accepted", true);
+
+                            // Reject all other negotiations for this offer
+                            trans->execSqlAsync(
+                                "UPDATE price_negotiations "
+                                "SET status = 'rejected', updated_at = NOW() "
+                                "WHERE offer_id = $1 AND id != $2 AND status = "
+                                "'pending' "
+                                "RETURNING id",
+                                [callback, trans, post_id,
+                                 id](const Result&
+                                         rejected_negotiations_result) {
+                                  // Update message metadata for rejected
+                                  // negotiations
+                                  for (const auto& row :
+                                       rejected_negotiations_result) {
+                                    std::string rejected_negotiation_id =
+                                        std::to_string(row["id"].as<int>());
+                                    update_message_metadata(
+                                        trans, rejected_negotiation_id,
+                                        "rejected", true);
+                                  }
+
+                                  // Reject all other offers for this post
+                                  trans->execSqlAsync(
+                                      "UPDATE offers SET status = 'rejected', "
+                                      "updated_at = NOW() "
+                                      "WHERE post_id = $1 AND id != $2 AND "
+                                      "status = 'pending' "
+                                      "RETURNING id",
+                                      [callback, trans, post_id,
+                                       id](const Result&
+                                               rejected_offers_result) {
+                                        // Update message metadata for rejected
+                                        // offers
+                                        for (const auto& row :
+                                             rejected_offers_result) {
+                                          std::string rejected_offer_id =
+                                              std::to_string(
+                                                  row["id"].as<int>());
+                                          update_message_metadata(
+                                              trans, rejected_offer_id,
+                                              "rejected");
+                                        }
+
+                                        // Reject all pending price negotiations
+                                        // for other offers
+                                        trans->execSqlAsync(
+                                            "UPDATE price_negotiations pn "
+                                            "SET status = 'rejected', "
+                                            "updated_at = NOW() "
+                                            "FROM offers o "
+                                            "WHERE pn.offer_id = o.id AND "
+                                            "o.post_id = $1 AND o.id != $2 AND "
+                                            "pn.status = 'pending' "
+                                            "RETURNING pn.id",
+                                            [callback, trans, post_id](
+                                                const Result&
+                                                    other_negotiations_result) {
+                                              // Update message metadata for
+                                              // rejected negotiations from
+                                              // other offers
+                                              for (const auto& row :
+                                                   other_negotiations_result) {
+                                                std::string
+                                                    rejected_negotiation_id =
+                                                        std::to_string(
+                                                            row["id"]
+                                                                .as<int>());
+                                                update_message_metadata(
+                                                    trans,
+                                                    rejected_negotiation_id,
+                                                    "rejected", true);
+                                              }
+
+                                              // Update post status to reflect
+                                              // that an offer was accepted
+                                              trans->execSqlAsync(
+                                                  "UPDATE posts SET "
+                                                  "request_status = "
+                                                  "'fulfilled' WHERE "
+                                                  "id = $1",
+                                                  [callback, trans](
+                                                      const Result& result) {
+                                                    // Commit the transaction
+                                                    trans->setCommitCallback(
+                                                        [callback](
+                                                            bool committed) {
+                                                          if (committed) {
+                                                            Json::Value ret;
+                                                            ret["status"] =
+                                                                "success";
+                                                            ret["message"] =
+                                                                "Counter-offer "
+                                                                "accepted "
+                                                                "successfully";
+                                                            auto resp =
+                                                                HttpResponse::
+                                                                    newHttpJsonResponse(
+                                                                        ret);
+                                                            callback(resp);
+                                                          } else {
+                                                            Json::Value error;
+                                                            error["error"] =
+                                                                "Failed to "
+                                                                "commit "
+                                                                "transaction";
+                                                            auto resp =
+                                                                HttpResponse::
+                                                                    newHttpJsonResponse(
+                                                                        error);
+                                                            resp->setStatusCode(
+                                                                k500InternalServerError);
+                                                            callback(resp);
+                                                          }
+                                                        });
+                                                  },
+                                                  [callback, trans](
+                                                      const DrogonDbException&
+                                                          e) {
+                                                    LOG_ERROR
+                                                        << "Database error: "
+                                                        << e.base().what();
+                                                    trans->rollback();
+                                                    Json::Value error;
+                                                    error["error"] =
+                                                        "Database error";
+                                                    auto resp = HttpResponse::
+                                                        newHttpJsonResponse(
+                                                            error);
+                                                    resp->setStatusCode(
+                                                        k500InternalServerError);
+                                                    callback(resp);
+                                                  },
+                                                  post_id);
+                                            },
+                                            [callback, trans](
+                                                const DrogonDbException& e) {
+                                              LOG_ERROR << "Database error: "
+                                                        << e.base().what();
+                                              trans->rollback();
+                                              Json::Value error;
+                                              error["error"] = "Database error";
+                                              auto resp = HttpResponse::
+                                                  newHttpJsonResponse(error);
+                                              resp->setStatusCode(
+                                                  k500InternalServerError);
+                                              callback(resp);
+                                            },
+                                            post_id, id);
+                                      },
+                                      [callback,
+                                       trans](const DrogonDbException& e) {
+                                        LOG_ERROR << "Database error: "
+                                                  << e.base().what();
+                                        trans->rollback();
+                                        Json::Value error;
+                                        error["error"] = "Database error";
+                                        auto resp =
+                                            HttpResponse::newHttpJsonResponse(
+                                                error);
+                                        resp->setStatusCode(
+                                            k500InternalServerError);
+                                        callback(resp);
+                                      },
+                                      post_id, id);
+                                },
+                                [callback, trans](const DrogonDbException& e) {
+                                  LOG_ERROR << "Database error: "
+                                            << e.base().what();
+                                  trans->rollback();
+                                  Json::Value error;
+                                  error["error"] = "Database error";
+                                  auto resp =
+                                      HttpResponse::newHttpJsonResponse(error);
+                                  resp->setStatusCode(k500InternalServerError);
+                                  callback(resp);
+                                },
+                                id, negotiation_id_str);
                           },
                           [callback, trans](const DrogonDbException& e) {
                             LOG_ERROR << "Database error: " << e.base().what();
@@ -535,7 +1223,7 @@ void Offers::accept_offer(
                             resp->setStatusCode(k500InternalServerError);
                             callback(resp);
                           },
-                          post_id);
+                          negotiation_id_str);
                     },
                     [callback, trans](const DrogonDbException& e) {
                       LOG_ERROR << "Database error: " << e.base().what();
@@ -546,7 +1234,7 @@ void Offers::accept_offer(
                       resp->setStatusCode(k500InternalServerError);
                       callback(resp);
                     },
-                    post_id, id);
+                    id, latest_price);
               },
               [callback, trans](const DrogonDbException& e) {
                 LOG_ERROR << "Database error: " << e.base().what();
@@ -681,6 +1369,7 @@ void Offers::get_my_offers(
           offer["title"] = row["title"].as<std::string>();
           offer["description"] = row["description"].as<std::string>();
           offer["price"] = row["price"].as<double>();
+          offer["original_price"] = row["original_price"].as<double>();
           offer["is_public"] = row["is_public"].as<bool>();
           offer["status"] = row["status"].as<std::string>();
           offer["created_at"] = row["created_at"].as<std::string>();
@@ -731,6 +1420,7 @@ void Offers::get_received_offers(
           offer["title"] = row["title"].as<std::string>();
           offer["description"] = row["description"].as<std::string>();
           offer["price"] = row["price"].as<double>();
+          offer["original_price"] = row["original_price"].as<double>();
           offer["is_public"] = row["is_public"].as<bool>();
           offer["status"] = row["status"].as<std::string>();
           offer["created_at"] = row["created_at"].as<std::string>();
