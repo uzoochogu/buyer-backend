@@ -21,6 +21,10 @@ class Chats : public drogon::HttpController<Chats> {
   ADD_METHOD_TO(Chats::send_message,
                 "/api/v1/conversations/{conversation_id}/messages", Post,
                 Options, "CorsMiddleware", "AuthMiddleware");
+
+  ADD_METHOD_TO(Chats::get_conversation_by_offer,
+                "/api/v1/conversations/offer/{offer_id}", Get, Options,
+                "CorsMiddleware", "AuthMiddleware");
   METHOD_LIST_END
 
   void get_conversations(
@@ -35,6 +39,11 @@ class Chats : public drogon::HttpController<Chats> {
   void send_message(const HttpRequestPtr &req,
                     std::function<void(const HttpResponsePtr &)> &&callback,
                     const std::string &conversation_id);
+
+  void get_conversation_by_offer(
+      const HttpRequestPtr &req,
+      std::function<void(const HttpResponsePtr &)> &&callback,
+      const std::string &offer_id);
 };
 
 }  // namespace v1
