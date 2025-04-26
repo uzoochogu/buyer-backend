@@ -17,27 +17,33 @@ using namespace drogon::orm;
 
 using namespace api::v1;
 
-void Dashboard::get_dashboard_data(
-    const HttpRequestPtr& req,
-    std::function<void(const HttpResponsePtr&)>&& callback) {
+Task<> Dashboard::get_dashboard_data(
+    HttpRequestPtr req, std::function<void(const HttpResponsePtr&)> callback) {
   auto db = app().getDbClient();
 
-  // Fetch orders data
-  db->execSqlAsync(
-      "SELECT status, COUNT(*) FROM orders GROUP BY status",
-      [callback](const Result& result) {
-        Json::Value orders_data;
-        for (const auto& row : result) {
-          orders_data[row["status"].as<std::string>()] = row["count"].as<int>();
-        }
+  try {
+    // Fetch orders data
+    auto result = co_await db->execSqlCoro(
+        "SELECT status, COUNT(*) FROM orders GROUP BY status");
 
-        // Prepare response
-        Json::Value ret;
-        ret["orders"] = orders_data;
-        auto resp = HttpResponse::newHttpJsonResponse(ret);
-        callback(resp);
-      },
-      [](const DrogonDbException& e) {
-        LOG_ERROR << "Database error: " << e.base().what();
-      });
+    Json::Value orders_data;
+    for (const auto& row : result) {
+      orders_data[row["status"].as<std::string>()] = row["count"].as<int>();
+    }
+
+    // Prepare response
+    Json::Value ret;
+    ret["orders"] = orders_data;
+    auto resp = HttpResponse::newHttpJsonResponse(ret);
+    callback(resp);
+  } catch (const DrogonDbException& e) {
+    LOG_ERROR << "Database error: " << e.base().what();
+    Json::Value error;
+    error["error"] = "Database error";
+    auto resp = HttpResponse::newHttpJsonResponse(error);
+    resp->setStatusCode(k500InternalServerError);
+    callback(resp);
+  }
+
+  co_return;
 }

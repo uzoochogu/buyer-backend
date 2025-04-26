@@ -16,10 +16,10 @@ class Orders : public drogon::HttpController<Orders> {
 
   METHOD_LIST_END
 
-  void get_orders(const HttpRequestPtr& req,
-                  std::function<void(const HttpResponsePtr&)>&& callback);
-  void create_order(const HttpRequestPtr& req,
-                    std::function<void(const HttpResponsePtr&)>&& callback);
+  Task<> get_orders(HttpRequestPtr req,
+                    std::function<void(const HttpResponsePtr&)> callback);
+  Task<> create_order(HttpRequestPtr req,
+                      std::function<void(const HttpResponsePtr&)> callback);
 };
 }  // namespace v1
 }  // namespace api

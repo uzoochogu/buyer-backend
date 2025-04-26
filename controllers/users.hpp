@@ -14,8 +14,8 @@ class Users : public drogon::HttpController<Users> {
                 "CorsMiddleware", "AuthMiddleware");
   METHOD_LIST_END
 
-  void get_users(const HttpRequestPtr& req,
-                 std::function<void(const HttpResponsePtr&)>&& callback);
+  Task<> get_users(HttpRequestPtr req,
+                   std::function<void(const HttpResponsePtr&)> callback);
 };
 
 }  // namespace v1
