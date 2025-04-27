@@ -14,9 +14,8 @@ class Dashboard : public drogon::HttpController<Dashboard> {
                 Options, "CorsMiddleware", "AuthMiddleware");
   METHOD_LIST_END
 
-  void get_dashboard_data(
-      const HttpRequestPtr& req,
-      std::function<void(const HttpResponsePtr&)>&& callback);
+  Task<> get_dashboard_data(
+      HttpRequestPtr req, std::function<void(const HttpResponsePtr&)> callback);
 };
 }  // namespace v1
 }  // namespace api

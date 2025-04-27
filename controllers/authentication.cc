@@ -155,9 +155,9 @@ bool verify_password_with_argon2(const std::string& password,
   return result == ARGON2_OK;
 }
 
-void Authentication::login(
-    const HttpRequestPtr& req,
-    std::function<void(const HttpResponsePtr&)>&& callback) {
+Task<> Authentication::login(
+    const HttpRequestPtr req,
+    std::function<void(const HttpResponsePtr&)> callback) {
   auto json = req->getJsonObject();
   std::string username = (*json)["username"].asString();
   std::string password = (*json)["password"].asString();
@@ -167,87 +167,92 @@ void Authentication::login(
   // std::endl;
 
   auto db = app().getDbClient();
-  db->execSqlAsync(
-      "SELECT id, username, password_hash FROM users WHERE username = $1",
-      [callback, password](const Result& result) {
-        if (result.size() > 0) {
-          const auto& row = result[0];
-          int user_id = row["id"].as<int>();
-          std::string username = row["username"].as<std::string>();
-          std::string storedHash = row["password_hash"].as<std::string>();
+  try {
+    auto result = co_await db->execSqlCoro(
+        "SELECT id, username, password_hash FROM users WHERE username = $1",
+        username);
 
-          // Verify password using Argon2
-          bool passwordMatches =
-              verify_password_with_argon2(password, storedHash);
+    if (result.size() > 0) {
+      const auto& row = result[0];
+      int user_id = row["id"].as<int>();
+      std::string username = row["username"].as<std::string>();
+      std::string stored_hash = row["password_hash"].as<std::string>();
 
-          if (passwordMatches) {
-            // Generate JWT token
-            std::string token = generate_jwt(user_id, username);
+      // Verify password using Argon2
+      bool password_matches =
+          verify_password_with_argon2(password, stored_hash);
 
-            // Generate refresh token
-            std::string refreshToken = generate_refresh_token();
+      if (password_matches) {
+        // Generate JWT token
+        std::string token = generate_jwt(user_id, username);
 
-            // Store refresh token in database
-            auto db = app().getDbClient();
-            auto expiry = std::chrono::system_clock::now() +
-                          std::chrono::hours(24 * 7);  // 1 week
-            auto expiry_time = std::chrono::system_clock::to_time_t(expiry);
+        // Generate refresh token
+        std::string refresh_token = generate_refresh_token();
 
-            db->execSqlAsync(
-                "INSERT INTO user_sessions (user_id, token, refresh_token, "
-                "expires_at) VALUES ($1, $2, $3, to_timestamp($4))",
-                [](const Result& result) {
-                  // Session stored successfully
-                },
-                [](const DrogonDbException& e) {
-                  LOG_ERROR << "Failed to store session: " << e.base().what();
-                },
-                user_id, token, refreshToken, static_cast<double>(expiry_time));
+        // Store refresh token in database
+        auto expiry = std::chrono::system_clock::now() +
+                      std::chrono::hours(24 * 7);  // 1 week
+        auto expiry_time = std::chrono::system_clock::to_time_t(expiry);
 
-            // Return success with tokens
-            Json::Value ret;
-            ret["status"] = "success";
-            ret["token"] = token;
-            ret["refresh_token"] = refreshToken;
-            ret["user_id"] = user_id;
-            ret["username"] = username;
+        try {
+          co_await db->execSqlCoro(
+              "INSERT INTO user_sessions (user_id, token, refresh_token, "
+              "expires_at) VALUES ($1, $2, $3, to_timestamp($4))",
+              user_id, token, refresh_token, static_cast<double>(expiry_time));
 
-            auto resp = HttpResponse::newHttpJsonResponse(ret);
-            callback(resp);
-          } else {
-            // Password doesn't match
-            Json::Value ret;
-            ret["status"] = "failure";
-            ret["message"] = "Invalid username or password";
-            auto resp = HttpResponse::newHttpJsonResponse(ret);
-            resp->setStatusCode(k401Unauthorized);
-            callback(resp);
-          }
-        } else {
-          // User not found
+          // Return success with tokens
+          Json::Value ret;
+          ret["status"] = "success";
+          ret["token"] = token;
+          ret["refresh_token"] = refresh_token;
+          ret["user_id"] = user_id;
+          ret["username"] = username;
+
+          auto resp = HttpResponse::newHttpJsonResponse(ret);
+          callback(resp);
+        } catch (const DrogonDbException& e) {
+          LOG_ERROR << "Failed to store session: " << e.base().what();
           Json::Value ret;
           ret["status"] = "failure";
-          ret["message"] = "Invalid username or password";
+          ret["message"] = "An error occurred";
           auto resp = HttpResponse::newHttpJsonResponse(ret);
-          resp->setStatusCode(k401Unauthorized);
+          resp->setStatusCode(k500InternalServerError);
           callback(resp);
         }
-      },
-      [callback](const DrogonDbException& e) {
-        LOG_ERROR << "Database error: " << e.base().what();
+      } else {
+        // Password doesn't match
         Json::Value ret;
         ret["status"] = "failure";
-        ret["message"] = "An error occurred";
+        ret["message"] = "Invalid username or password";
         auto resp = HttpResponse::newHttpJsonResponse(ret);
-        resp->setStatusCode(k500InternalServerError);
+        resp->setStatusCode(k401Unauthorized);
         callback(resp);
-      },
-      username);
+      }
+    } else {
+      // User not found
+      Json::Value ret;
+      ret["status"] = "failure";
+      ret["message"] = "Invalid username or password";
+      auto resp = HttpResponse::newHttpJsonResponse(ret);
+      resp->setStatusCode(k401Unauthorized);
+      callback(resp);
+    }
+  } catch (const DrogonDbException& e) {
+    LOG_ERROR << "Database error: " << e.base().what();
+    Json::Value ret;
+    ret["status"] = "failure";
+    ret["message"] = "An error occurred";
+    auto resp = HttpResponse::newHttpJsonResponse(ret);
+    resp->setStatusCode(k500InternalServerError);
+    callback(resp);
+  }
+
+  co_return;
 }
 
-void Authentication::logout(
-    const HttpRequestPtr& req,
-    std::function<void(const HttpResponsePtr&)>&& callback) {
+Task<> Authentication::logout(
+    const HttpRequestPtr req,
+    std::function<void(const HttpResponsePtr&)> callback) {
   // Get the token from the Authorization header
   const std::string& auth_header = req->getHeader("Authorization");
 
@@ -256,24 +261,23 @@ void Authentication::logout(
 
     // Remove the session from the database
     auto db = app().getDbClient();
-    db->execSqlAsync(
-        "DELETE FROM user_sessions WHERE token = $1",
-        [callback](const Result& result) {
-          Json::Value ret;
-          ret["status"] = "success";
-          auto resp = HttpResponse::newHttpJsonResponse(ret);
-          callback(resp);
-        },
-        [callback](const DrogonDbException& e) {
-          LOG_ERROR << "Database error: " << e.base().what();
-          Json::Value ret;
-          ret["status"] = "failure";
-          ret["message"] = "An error occurred";
-          auto resp = HttpResponse::newHttpJsonResponse(ret);
-          resp->setStatusCode(k500InternalServerError);
-          callback(resp);
-        },
-        token);
+    try {
+      co_await db->execSqlCoro("DELETE FROM user_sessions WHERE token = $1",
+                               token);
+
+      Json::Value ret;
+      ret["status"] = "success";
+      auto resp = HttpResponse::newHttpJsonResponse(ret);
+      callback(resp);
+    } catch (const DrogonDbException& e) {
+      LOG_ERROR << "Database error: " << e.base().what();
+      Json::Value ret;
+      ret["status"] = "failure";
+      ret["message"] = "An error occurred";
+      auto resp = HttpResponse::newHttpJsonResponse(ret);
+      resp->setStatusCode(k500InternalServerError);
+      callback(resp);
+    }
   } else {
     // No token provided
     Json::Value ret;
@@ -282,114 +286,123 @@ void Authentication::logout(
     auto resp = HttpResponse::newHttpJsonResponse(ret);
     callback(resp);
   }
+
+  co_return;
 }
 
-void Authentication::refresh(
-    const HttpRequestPtr& req,
-    std::function<void(const HttpResponsePtr&)>&& callback) {
+Task<> Authentication::refresh(
+    const HttpRequestPtr req,
+    std::function<void(const HttpResponsePtr&)> callback) {
   auto json = req->getJsonObject();
-  std::string refreshToken = (*json)["refresh_token"].asString();
+  std::string refresh_token = (*json)["refresh_token"].asString();
 
-  if (refreshToken.empty()) {
+  if (refresh_token.empty()) {
     Json::Value ret;
     ret["status"] = "failure";
     ret["message"] = "Refresh token is required";
     auto resp = HttpResponse::newHttpJsonResponse(ret);
     resp->setStatusCode(k400BadRequest);
     callback(resp);
-    return;
+    co_return;
   }
 
   auto db = app().getDbClient();
-  db->execSqlAsync(
-      "SELECT user_id, expires_at FROM user_sessions WHERE refresh_token = $1",
-      [callback, refreshToken, db](const Result& result) {
-        if (result.size() > 0) {
-          const auto& row = result[0];
-          int user_id = row["user_id"].as<int>();
+  try {
+    auto result = co_await db->execSqlCoro(
+        "SELECT user_id, expires_at FROM user_sessions WHERE refresh_token ="
+        "$1",
+        refresh_token);
 
-          // Check if refresh token has expired
-          auto expiryStr = row["expires_at"].as<std::string>();
-          // Parse expiry time and check if it's in the past
-          // This is a simplified check - in production you'd want to parse the
-          // timestamp properly
-          auto now = std::chrono::system_clock::now();
-          auto nowTime = std::chrono::system_clock::to_time_t(now);
+    if (result.size() > 0) {
+      const auto& row = result[0];
+      int user_id = row["user_id"].as<int>();
 
-          // For simplicity, we'll just generate a new token without checking
-          // expiry In production, you should properly check the expiry time
+      // Check if refresh token has expired
+      auto expiry_str = row["expires_at"].as<std::string>();
 
-          // Get username for the token
-          db->execSqlAsync(
-              "SELECT username FROM users WHERE id = $1",
-              [callback, user_id, refreshToken, db](const Result& userResult) {
-                if (userResult.size() > 0) {
-                  std::string username =
-                      userResult[0]["username"].as<std::string>();
+      // Parse timestamp from PostgreSQL format (e.g., "2025-04-25 12:34:56")
+      std::chrono::system_clock::time_point expiry_time_point;
+      std::istringstream ss(expiry_str);
+      // std::tm tm = {};
+      // ss >> std::get_time(&tm, "%Y-%m-%d %H:%M:%S");
+      ss >> std::chrono::parse("%Y-%m-%d %H:%M:%S", expiry_time_point);
+      if (ss.fail()) {
+        LOG_ERROR << "Failed to parse expiry time: " << expiry_str;
+        Json::Value ret;
+        ret["status"] = "failure";
+        ret["message"] = "An error occurred";
+        auto resp = HttpResponse::newHttpJsonResponse(ret);
+        resp->setStatusCode(k500InternalServerError);
+        callback(resp);
+        co_return;
+      }
 
-                  // Generate new JWT token
-                  std::string newToken = generate_jwt(user_id, username);
+      // auto old_expiry_time = std::mktime(&tm); // to time_t to compare
+      // auto now = std::chrono::system_clock::to_time_t(
+      //    std::chrono::system_clock::now());
 
-                  // Generate new refresh token
-                  std::string newRefreshToken = generate_refresh_token();
+      auto now = std::chrono::system_clock::now();
 
-                  // Update session in database
-                  auto expiry = std::chrono::system_clock::now() +
-                                std::chrono::hours(24 * 7);  // 1 week
-                  auto expiry_time =
-                      std::chrono::system_clock::to_time_t(expiry);
+      // Check if token has expired
+      if (expiry_time_point < now) {
+        LOG_INFO << "Refresh token has expired";
+        Json::Value ret;
+        ret["status"] = "failure";
+        ret["message"] = "Refresh token has expired";
+        auto resp = HttpResponse::newHttpJsonResponse(ret);
+        resp->setStatusCode(k401Unauthorized);
+        callback(resp);
+        co_return;
+      }
 
-                  db->execSqlAsync(
-                      "UPDATE user_sessions SET token = $1, refresh_token = "
-                      "$2, expires_at = to_timestamp($3) WHERE refresh_token = "
-                      "$4",
-                      [callback, user_id, username, newToken,
-                       newRefreshToken](const Result& updateResult) {
-                        // Return success with new tokens
-                        Json::Value ret;
-                        ret["status"] = "success";
-                        ret["token"] = newToken;
-                        ret["refresh_token"] = newRefreshToken;
-                        ret["user_id"] = user_id;
-                        ret["username"] = username;
+      // Token is still valid, proceed with refresh
+      // Get username for the token
+      try {
+        auto user_result = co_await db->execSqlCoro(
+            "SELECT username FROM users WHERE id = $1", user_id);
 
-                        auto resp = HttpResponse::newHttpJsonResponse(ret);
-                        callback(resp);
-                      },
-                      [callback](const DrogonDbException& e) {
-                        LOG_ERROR << "Failed to update session: "
-                                  << e.base().what();
-                        Json::Value ret;
-                        ret["status"] = "failure";
-                        ret["message"] = "An error occurred";
-                        auto resp = HttpResponse::newHttpJsonResponse(ret);
-                        resp->setStatusCode(k500InternalServerError);
-                        callback(resp);
-                      },
-                      newToken, newRefreshToken,
-                      static_cast<double>(expiry_time), refreshToken);
-                } else {
-                  // User not found
-                  Json::Value ret;
-                  ret["status"] = "failure";
-                  ret["message"] = "Invalid refresh token";
-                  auto resp = HttpResponse::newHttpJsonResponse(ret);
-                  resp->setStatusCode(k401Unauthorized);
-                  callback(resp);
-                }
-              },
-              [callback](const DrogonDbException& e) {
-                LOG_ERROR << "Database error: " << e.base().what();
-                Json::Value ret;
-                ret["status"] = "failure";
-                ret["message"] = "An error occurred";
-                auto resp = HttpResponse::newHttpJsonResponse(ret);
-                resp->setStatusCode(k500InternalServerError);
-                callback(resp);
-              },
-              user_id);
+        if (user_result.size() > 0) {
+          std::string username = user_result[0]["username"].as<std::string>();
+
+          // Generate new JWT token
+          std::string new_token = generate_jwt(user_id, username);
+
+          // Generate new refresh token
+          std::string new_refresh_token = generate_refresh_token();
+
+          // Update session in database
+          auto expiry = std::chrono::system_clock::now() +
+                        std::chrono::hours(24 * 7);  // 1 week
+          auto expiry_time = std::chrono::system_clock::to_time_t(expiry);
+
+          try {
+            co_await db->execSqlCoro(
+                "UPDATE user_sessions SET token = $1, refresh_token = "
+                "$2, expires_at = to_timestamp($3) WHERE refresh_token = $4",
+                new_token, new_refresh_token, static_cast<double>(expiry_time),
+                refresh_token);
+
+            // Return success with new tokens
+            Json::Value ret;
+            ret["status"] = "success";
+            ret["token"] = new_token;
+            ret["refresh_token"] = new_refresh_token;
+            ret["user_id"] = user_id;
+            ret["username"] = username;
+
+            auto resp = HttpResponse::newHttpJsonResponse(ret);
+            callback(resp);
+          } catch (const DrogonDbException& e) {
+            LOG_ERROR << "Failed to update session: " << e.base().what();
+            Json::Value ret;
+            ret["status"] = "failure";
+            ret["message"] = "An error occurred";
+            auto resp = HttpResponse::newHttpJsonResponse(ret);
+            resp->setStatusCode(k500InternalServerError);
+            callback(resp);
+          }
         } else {
-          // Refresh token not found
+          // User not found
           Json::Value ret;
           ret["status"] = "failure";
           ret["message"] = "Invalid refresh token";
@@ -397,8 +410,7 @@ void Authentication::refresh(
           resp->setStatusCode(k401Unauthorized);
           callback(resp);
         }
-      },
-      [callback](const DrogonDbException& e) {
+      } catch (const DrogonDbException& e) {
         LOG_ERROR << "Database error: " << e.base().what();
         Json::Value ret;
         ret["status"] = "failure";
@@ -406,13 +418,32 @@ void Authentication::refresh(
         auto resp = HttpResponse::newHttpJsonResponse(ret);
         resp->setStatusCode(k500InternalServerError);
         callback(resp);
-      },
-      refreshToken);
+      }
+    } else {
+      // Refresh token not found
+      Json::Value ret;
+      ret["status"] = "failure";
+      ret["message"] = "Invalid refresh token";
+      auto resp = HttpResponse::newHttpJsonResponse(ret);
+      resp->setStatusCode(k401Unauthorized);
+      callback(resp);
+    }
+  } catch (const DrogonDbException& e) {
+    LOG_ERROR << "Database error: " << e.base().what();
+    Json::Value ret;
+    ret["status"] = "failure";
+    ret["message"] = "An error occurred";
+    auto resp = HttpResponse::newHttpJsonResponse(ret);
+    resp->setStatusCode(k500InternalServerError);
+    callback(resp);
+  }
+
+  co_return;
 }
 
-void Authentication::register_user(
-    const HttpRequestPtr& req,
-    std::function<void(const HttpResponsePtr&)>&& callback) {
+Task<> Authentication::register_user(
+    const HttpRequestPtr req,
+    std::function<void(const HttpResponsePtr&)> callback) {
   auto json = req->getJsonObject();
   std::string username = (*json)["username"].asString();
   std::string email = (*json)["email"].asString();
@@ -426,7 +457,7 @@ void Authentication::register_user(
     auto resp = HttpResponse::newHttpJsonResponse(ret);
     resp->setStatusCode(k400BadRequest);
     callback(resp);
-    return;
+    co_return;
   }
 
   // Hash password with Argon2
@@ -441,105 +472,100 @@ void Authentication::register_user(
     auto resp = HttpResponse::newHttpJsonResponse(ret);
     resp->setStatusCode(k500InternalServerError);
     callback(resp);
-    return;
+    co_return;
   }
 
   auto db = app().getDbClient();
 
-  // Check if username or email already exists
-  db->execSqlAsync(
-      "SELECT id FROM users WHERE username = $1 OR email = $2",
-      [callback, db, username, email, password_hash](const Result& result) {
-        if (result.size() > 0) {
-          // Username or email already exists
+  try {
+    // Check if username or email already exists
+    auto result = co_await db->execSqlCoro(
+        "SELECT id FROM users WHERE username = $1 OR email = $2", username,
+        email);
+
+    if (result.size() > 0) {
+      // Username or email already exists
+      Json::Value ret;
+      ret["status"] = "failure";
+      ret["message"] = "Username or email already exists";
+      auto resp = HttpResponse::newHttpJsonResponse(ret);
+      resp->setStatusCode(k409Conflict);
+      callback(resp);
+    } else {
+      // Create new user
+      try {
+        auto insert_result = co_await db->execSqlCoro(
+            "INSERT INTO users (username, email, password_hash) VALUES ($1, "
+            "$2, $3) RETURNING id",
+            username, email, password_hash);
+
+        if (insert_result.size() > 0) {
+          int user_id = insert_result[0]["id"].as<int>();
+
+          // Generate JWT token
+          std::string token = generate_jwt(user_id, username);
+
+          // Generate refresh token
+          std::string refresh_token = generate_refresh_token();
+          // Store refresh token in database
+          auto expiry = std::chrono::system_clock::now() +
+                        std::chrono::hours(24 * 7);  // 1 week
+          auto expiry_time = std::chrono::system_clock::to_time_t(expiry);
+
+          try {
+            co_await db->execSqlCoro(
+                "INSERT INTO user_sessions (user_id, token, refresh_token, "
+                "expires_at) VALUES ($1, $2, $3, to_timestamp($4))",
+                user_id, token, refresh_token,
+                static_cast<double>(expiry_time));
+
+            // Return success with tokens
+            Json::Value ret;
+            ret["status"] = "success";
+            ret["token"] = token;
+            ret["refresh_token"] = refresh_token;
+            ret["user_id"] = user_id;
+            ret["username"] = username;
+
+            auto resp = HttpResponse::newHttpJsonResponse(ret);
+            callback(resp);
+          } catch (const DrogonDbException& e) {
+            LOG_ERROR << "Failed to store session: " << e.base().what();
+            Json::Value ret;
+            ret["status"] = "failure";
+            ret["message"] = "Registration successful, but failed to log in";
+            auto resp = HttpResponse::newHttpJsonResponse(ret);
+            resp->setStatusCode(k500InternalServerError);
+            callback(resp);
+          }
+        } else {
+          // Failed to insert user
           Json::Value ret;
           ret["status"] = "failure";
-          ret["message"] = "Username or email already exists";
+          ret["message"] = "Failed to create user";
           auto resp = HttpResponse::newHttpJsonResponse(ret);
-          resp->setStatusCode(k409Conflict);
+          resp->setStatusCode(k500InternalServerError);
           callback(resp);
-        } else {
-          // Create new user
-          db->execSqlAsync(
-              "INSERT INTO users (username, email, password_hash) VALUES ($1, "
-              "$2, $3) RETURNING id",
-              [callback, username, password_hash](const Result& insert_result) {
-                if (insert_result.size() > 0) {
-                  int user_id = insert_result[0]["id"].as<int>();
-
-                  // Generate JWT token
-                  std::string token = generate_jwt(user_id, username);
-
-                  // Generate refresh token
-                  std::string refreshToken = generate_refresh_token();
-
-                  // Store refresh token in database
-                  auto db = app().getDbClient();
-                  auto expiry = std::chrono::system_clock::now() +
-                                std::chrono::hours(24 * 7);  // 1 week
-                  auto expiry_time =
-                      std::chrono::system_clock::to_time_t(expiry);
-
-                  db->execSqlAsync(
-                      "INSERT INTO user_sessions (user_id, token, "
-                      "refresh_token, expires_at) VALUES ($1, $2, $3, "
-                      "to_timestamp($4))",
-                      [callback, user_id, username, token,
-                       refreshToken](const Result& session_result) {
-                        // Return success with tokens
-                        Json::Value ret;
-                        ret["status"] = "success";
-                        ret["token"] = token;
-                        ret["refresh_token"] = refreshToken;
-                        ret["user_id"] = user_id;
-                        ret["username"] = username;
-
-                        auto resp = HttpResponse::newHttpJsonResponse(ret);
-                        callback(resp);
-                      },
-                      [callback](const DrogonDbException& e) {
-                        LOG_ERROR << "Failed to store session: "
-                                  << e.base().what();
-                        Json::Value ret;
-                        ret["status"] = "failure";
-                        ret["message"] =
-                            "User created but failed to create session";
-                        auto resp = HttpResponse::newHttpJsonResponse(ret);
-                        resp->setStatusCode(k500InternalServerError);
-                        callback(resp);
-                      },
-                      user_id, token, refreshToken,
-                      static_cast<double>(expiry_time));
-                } else {
-                  // Failed to create user
-                  Json::Value ret;
-                  ret["status"] = "failure";
-                  ret["message"] = "Failed to create user";
-                  auto resp = HttpResponse::newHttpJsonResponse(ret);
-                  resp->setStatusCode(k500InternalServerError);
-                  callback(resp);
-                }
-              },
-              [callback](const DrogonDbException& e) {
-                LOG_ERROR << "Database error: " << e.base().what();
-                Json::Value ret;
-                ret["status"] = "failure";
-                ret["message"] = "An error occurred";
-                auto resp = HttpResponse::newHttpJsonResponse(ret);
-                resp->setStatusCode(k500InternalServerError);
-                callback(resp);
-              },
-              username, email, password_hash);
         }
-      },
-      [callback](const DrogonDbException& e) {
+      } catch (const DrogonDbException& e) {
         LOG_ERROR << "Database error: " << e.base().what();
         Json::Value ret;
         ret["status"] = "failure";
-        ret["message"] = "An error occurred";
+        ret["message"] = "An error occurred during registration";
         auto resp = HttpResponse::newHttpJsonResponse(ret);
         resp->setStatusCode(k500InternalServerError);
         callback(resp);
-      },
-      username, email);
+      }
+    }
+  } catch (const DrogonDbException& e) {
+    LOG_ERROR << "Database error: " << e.base().what();
+    Json::Value ret;
+    ret["status"] = "failure";
+    ret["message"] = "An error occurred during registration";
+    auto resp = HttpResponse::newHttpJsonResponse(ret);
+    resp->setStatusCode(k500InternalServerError);
+    callback(resp);
+  }
+
+  co_return;
 }

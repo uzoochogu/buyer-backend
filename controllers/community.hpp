@@ -35,32 +35,30 @@ class Community : public drogon::HttpController<Community> {
                 "CorsMiddleware", "AuthMiddleware");
   METHOD_LIST_END
 
-  void get_posts(const HttpRequestPtr& req,
-                 std::function<void(const HttpResponsePtr&)>&& callback);
-  void get_post_by_id(const HttpRequestPtr& req,
-                      std::function<void(const HttpResponsePtr&)>&& callback,
-                      const std::string& id);
-  void filter_posts(const HttpRequestPtr& req,
-                    std::function<void(const HttpResponsePtr&)>&& callback);
-  void get_subscriptions(
-      const HttpRequestPtr& req,
-      std::function<void(const HttpResponsePtr&)>&& callback);
-  void get_popular_tags(const HttpRequestPtr& req,
-                        std::function<void(const HttpResponsePtr&)>&& callback);
+  Task<> get_posts(const HttpRequestPtr req,
+                   std::function<void(const HttpResponsePtr&)> callback);
+  Task<> get_post_by_id(HttpRequestPtr req,
+                        std::function<void(const HttpResponsePtr&)> callback,
+                        std::string id);
+  Task<> filter_posts(HttpRequestPtr req,
+                      std::function<void(const HttpResponsePtr&)> callback);
+  Task<> get_subscriptions(
+      HttpRequestPtr req, std::function<void(const HttpResponsePtr&)> callback);
+  Task<> get_popular_tags(HttpRequestPtr req,
+                          std::function<void(const HttpResponsePtr&)> callback);
 
-  void create_post(const HttpRequestPtr& req,
-                   std::function<void(const HttpResponsePtr&)>&& callback);
-  void subscribe_to_post(const HttpRequestPtr& req,
-                         std::function<void(const HttpResponsePtr&)>&& callback,
-                         const std::string& id);
-  void unsubscribe_from_post(
-      const HttpRequestPtr& req,
-      std::function<void(const HttpResponsePtr&)>&& callback,
-      const std::string& id);
+  Task<> create_post(HttpRequestPtr req,
+                     std::function<void(const HttpResponsePtr&)> callback);
+  Task<> subscribe_to_post(HttpRequestPtr req,
+                           std::function<void(const HttpResponsePtr&)> callback,
+                           std::string id);
+  Task<> unsubscribe_from_post(
+      HttpRequestPtr req, std::function<void(const HttpResponsePtr&)> callback,
+      std::string id);
 
-  void update_post(const HttpRequestPtr& req,
-                   std::function<void(const HttpResponsePtr&)>&& callback,
-                   const std::string& id);
+  Task<> update_post(HttpRequestPtr req,
+                     std::function<void(const HttpResponsePtr&)> callback,
+                     std::string id);
 };
 }  // namespace v1
 }  // namespace api

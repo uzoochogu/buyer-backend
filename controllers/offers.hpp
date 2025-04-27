@@ -91,92 +91,86 @@ class Offers : public drogon::HttpController<Offers> {
                 "CorsMiddleware", "AuthMiddleware");
   METHOD_LIST_END
 
-  void get_offers_for_post(
-      const HttpRequestPtr& req,
-      std::function<void(const HttpResponsePtr&)>&& callback,
-      const std::string& post_id);
+  Task<> get_offers_for_post(
+      HttpRequestPtr req, std::function<void(const HttpResponsePtr&)> callback,
+      std::string post_id);
 
-  void create_offer(const HttpRequestPtr& req,
-                    std::function<void(const HttpResponsePtr&)>&& callback,
-                    const std::string& post_id);
+  Task<> create_offer(HttpRequestPtr req,
+                      std::function<void(const HttpResponsePtr&)> callback,
+                      std::string post_id);
 
-  void get_offer(const HttpRequestPtr& req,
-                 std::function<void(const HttpResponsePtr&)>&& callback,
-                 const std::string& id);
+  Task<> get_offer(HttpRequestPtr req,
+                   std::function<void(const HttpResponsePtr&)> callback,
+                   std::string id);
 
-  void update_offer(const HttpRequestPtr& req,
-                    std::function<void(const HttpResponsePtr&)>&& callback,
-                    const std::string& id);
+  Task<> update_offer(HttpRequestPtr req,
+                      std::function<void(const HttpResponsePtr&)> callback,
+                      std::string id);
 
-  void accept_offer(const HttpRequestPtr& req,
-                    std::function<void(const HttpResponsePtr&)>&& callback,
-                    const std::string& id);
+  Task<> accept_offer(HttpRequestPtr req,
+                      std::function<void(const HttpResponsePtr&)> callback,
+                      std::string id);
 
-  void accept_counter_offer(
-      const HttpRequestPtr& req,
-      std::function<void(const HttpResponsePtr&)>&& callback,
-      const std::string& id);
+  Task<> accept_counter_offer(
+      HttpRequestPtr req, std::function<void(const HttpResponsePtr&)> callback,
+      std::string id);
 
-  void reject_offer(const HttpRequestPtr& req,
-                    std::function<void(const HttpResponsePtr&)>&& callback,
-                    const std::string& id);
+  Task<> reject_offer(HttpRequestPtr req,
+                      std::function<void(const HttpResponsePtr&)> callback,
+                      std::string id);
 
-  void get_my_offers(const HttpRequestPtr& req,
-                     std::function<void(const HttpResponsePtr&)>&& callback);
+  Task<> get_my_offers(HttpRequestPtr req,
+                       std::function<void(const HttpResponsePtr&)> callback);
 
-  void get_received_offers(
-      const HttpRequestPtr& req,
-      std::function<void(const HttpResponsePtr&)>&& callback);
+  Task<> get_received_offers(
+      HttpRequestPtr req, std::function<void(const HttpResponsePtr&)> callback);
 
-  void get_notifications(
-      const HttpRequestPtr& req,
-      std::function<void(const HttpResponsePtr&)>&& callback);
+  Task<> get_notifications(
+      HttpRequestPtr req, std::function<void(const HttpResponsePtr&)> callback);
 
-  void mark_notification_read(
-      const HttpRequestPtr& req,
-      std::function<void(const HttpResponsePtr&)>&& callback,
-      const std::string& id);
+  Task<> mark_notification_read(
+      HttpRequestPtr req, std::function<void(const HttpResponsePtr&)> callback,
+      std::string id);
 
-  void mark_all_notifications_read(
-      const HttpRequestPtr& req,
-      std::function<void(const HttpResponsePtr&)>&& callback);
+  Task<> mark_all_notifications_read(
+      HttpRequestPtr req, std::function<void(const HttpResponsePtr&)> callback);
 
-  void negotiate_offer(const HttpRequestPtr& req,
-                       std::function<void(const HttpResponsePtr&)>&& callback,
-                       const std::string& id);
+  Task<> negotiate_offer(HttpRequestPtr req,
+                         std::function<void(const HttpResponsePtr&)> callback,
+                         std::string id);
 
-  void get_negotiations(const HttpRequestPtr& req,
-                        std::function<void(const HttpResponsePtr&)>&& callback,
-                        const std::string& id);
+  Task<> get_negotiations(HttpRequestPtr req,
+                          std::function<void(const HttpResponsePtr&)> callback,
+                          std::string id);
 
   // upcoming features
-  void request_proof(const HttpRequestPtr& req,
-                     std::function<void(const HttpResponsePtr&)>&& callback,
-                     const std::string& id);
+  Task<> request_proof(HttpRequestPtr req,
+                       std::function<void(const HttpResponsePtr&)> callback,
+                       std::string id);
 
-  void submit_proof(const HttpRequestPtr& req,
-                    std::function<void(const HttpResponsePtr&)>&& callback,
-                    const std::string& id);
+  Task<> submit_proof(HttpRequestPtr req,
+                      std::function<void(const HttpResponsePtr&)> callback,
+                      std::string id);
 
-  void get_proofs(const HttpRequestPtr& req,
-                  std::function<void(const HttpResponsePtr&)>&& callback,
-                  const std::string& id);
+  Task<> get_proofs(HttpRequestPtr req,
+                    std::function<void(const HttpResponsePtr&)> callback,
+                    std::string id);
 
-  void approve_proof(const HttpRequestPtr& req,
-                     std::function<void(const HttpResponsePtr&)>&& callback,
-                     const std::string& id, const std::string& proof_id);
+  Task<> approve_proof(HttpRequestPtr req,
+                       std::function<void(const HttpResponsePtr&)> callback,
+                       std::string id, std::string proof_id);
 
-  void reject_proof(const HttpRequestPtr& req,
-                    std::function<void(const HttpResponsePtr&)>&& callback,
-                    const std::string& id, const std::string& proof_id);
+  Task<> reject_proof(HttpRequestPtr req,
+                      std::function<void(const HttpResponsePtr&)> callback,
+                      std::string id, std::string proof_id);
 
-  void create_escrow(const HttpRequestPtr& req,
-                     std::function<void(const HttpResponsePtr&)>&& callback,
-                     const std::string& id);
+  Task<> create_escrow(HttpRequestPtr req,
+                       std::function<void(const HttpResponsePtr&)> callback,
+                       std::string id);
 
-  void get_escrow(const HttpRequestPtr& req,
-                  std::function<void(const HttpResponsePtr&)>&& callback,
-                  const std::string& id);
+  Task<> get_escrow(HttpRequestPtr req,
+                    std::function<void(const HttpResponsePtr&)> callback,
+                    std::string id);
 };
 }  // namespace v1
 }  // namespace api

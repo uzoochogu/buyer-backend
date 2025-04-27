@@ -14,8 +14,8 @@ class Search : public drogon::HttpController<Search> {
 
   METHOD_LIST_END
 
-  void search(const HttpRequestPtr& req,
-              std::function<void(const HttpResponsePtr&)>&& callback);
+  Task<> search(HttpRequestPtr req,
+                std::function<void(const HttpResponsePtr&)> callback);
 };
 }  // namespace v1
 }  // namespace api
