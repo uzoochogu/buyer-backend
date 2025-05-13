@@ -35,7 +35,7 @@ target_link_libraries(${PROJECT_NAME} PRIVATE Drogon::Drogon
 aux_source_directory(controllers CTL_SRC)
 aux_source_directory(filters FILTER_SRC)
 aux_source_directory(plugins PLUGIN_SRC)
-aux_source_directory(models MODEL_SRC)
+# aux_source_directory(models MODEL_SRC) # Not used for now
 aux_source_directory(config CONFIG_SRC)
 
 drogon_create_views(${PROJECT_NAME} ${CMAKE_CURRENT_SOURCE_DIR}/views
@@ -64,5 +64,20 @@ target_sources(${PROJECT_NAME}
 # set_property(TARGET ${PROJECT_NAME} PROPERTY ENABLE_EXPORTS ON)
 
 # ##############################################################################
+
+# Database management for tests
+if(WIN32)
+    add_custom_target(setup_test_db
+        COMMAND ${CMAKE_CURRENT_SOURCE_DIR}/scripts/setup_test_db.bat
+        WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
+        COMMENT "Setting up test database"
+    )
+else()
+    add_custom_target(setup_test_db
+        COMMAND ${CMAKE_CURRENT_SOURCE_DIR}/scripts/setup_test_db.sh
+        WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
+        COMMENT "Setting up test database"
+    )
+endif()
 
 add_subdirectory(test)
