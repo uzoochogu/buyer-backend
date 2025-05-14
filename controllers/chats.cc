@@ -12,6 +12,8 @@
 #include <drogon/orm/Row.h>
 #include <drogon/orm/SqlBinder.h>
 
+#include "../utilities/conversion.hpp"
+
 using namespace drogon;
 using namespace drogon::orm;
 
@@ -77,6 +79,19 @@ Task<> Chats::create_conversation(
   auto json = req->getJsonObject();
   std::string user_id =
       req->getAttributes()->get<std::string>("current_user_id");
+
+  // Validation: Ensure name and user_id are provided
+  if (!json || !(*json).isMember("name") || !(*json).isMember("user_id") ||
+      (*json)["name"].asString().empty() || (*json)["user_id"].asInt() < 0) {
+    Json::Value error;
+    error["error"] = "Valid user_id and name required";
+    auto resp = HttpResponse::newHttpJsonResponse(error);
+    resp->setStatusCode(k400BadRequest);
+    callback(resp);
+    co_return;
+  }
+
+  LOG_INFO << "Does user_id exist? : " << (*json).isMember("user_id");
   int other_user_id = (*json)["user_id"].asInt();
   std::string name = (*json)["name"].asString();
 
@@ -156,6 +171,16 @@ Task<> Chats::get_messages(HttpRequestPtr req,
                            std::string conversation_id) {
   std::string user_id =
       req->getAttributes()->get<std::string>("current_user_id");
+  // Validation: Malformed route
+  if (!convert::string_to_int(conversation_id).has_value() ||
+      convert::string_to_int(conversation_id).value() < 0) {
+    Json::Value error;
+    error["error"] = "Invalid conversation_id";
+    auto resp = HttpResponse::newHttpJsonResponse(error);
+    resp->setStatusCode(k400BadRequest);
+    callback(resp);
+    co_return;
+  }
 
   auto db = app().getDbClient();
 
@@ -220,6 +245,27 @@ Task<> Chats::send_message(HttpRequestPtr req,
   auto json = req->getJsonObject();
   std::string user_id =
       req->getAttributes()->get<std::string>("current_user_id");
+
+  // Validation: Malformed route
+  if (!convert::string_to_int(conversation_id).has_value() ||
+      convert::string_to_int(conversation_id).value() < 0) {
+    Json::Value error;
+    error["error"] = "Invalid conversation_id";
+    auto resp = HttpResponse::newHttpJsonResponse(error);
+    resp->setStatusCode(k400BadRequest);
+    callback(resp);
+    co_return;
+  }
+  // Validation: Missing message content
+  if (!json || !(*json).isMember("content") ||
+      (*json)["content"].asString().empty()) {
+    Json::Value error;
+    error["error"] = "Message content is required";
+    auto resp = HttpResponse::newHttpJsonResponse(error);
+    resp->setStatusCode(k400BadRequest);
+    callback(resp);
+    co_return;
+  }
   std::string content = (*json)["content"].asString();
 
   auto db = app().getDbClient();
@@ -281,6 +327,17 @@ Task<> Chats::get_conversation_by_offer(
   std::string current_user_id =
       req->getAttributes()->get<std::string>("current_user_id");
   auto db = app().getDbClient();
+
+  // Validation: Malformed route
+  if (!convert::string_to_int(offer_id).has_value() ||
+      convert::string_to_int(offer_id).value() < 0) {
+    Json::Value error;
+    error["error"] = "Invalid offer ID";
+    auto resp = HttpResponse::newHttpJsonResponse(error);
+    resp->setStatusCode(k400BadRequest);
+    callback(resp);
+    co_return;
+  }
 
   try {
     // First, check if the user is authorized to access this offer's

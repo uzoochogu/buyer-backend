@@ -6,6 +6,11 @@ add_executable(${PROJECT_NAME}
   test_main.cc
   test_authentication.cc
   test_search.cc
+  test_chats.cc
+  test_community.cc
+  test_users.cc
+  test_orders.cc
+  test_dashboard.cc
 )
 
 # ##############################################################################

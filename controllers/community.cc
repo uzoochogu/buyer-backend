@@ -17,6 +17,8 @@
 #include <string>
 #include <vector>
 
+#include "../utilities/conversion.hpp"
+
 using namespace drogon;
 using namespace drogon::orm;
 
@@ -145,8 +147,19 @@ Task<> Community::create_post(
   auto json = req->getJsonObject();
   std::string user_id =
       req->getAttributes()->get<std::string>("current_user_id");
-  std::string content = (*json)["content"].asString();
 
+  // Validation: Post must have content
+  if (!json || !(*json).isMember("content") ||
+      (*json)["content"].asString().empty()) {
+    Json::Value error;
+    error["error"] = "Post has no content.";
+    auto resp = HttpResponse::newHttpJsonResponse(error);
+    resp->setStatusCode(k400BadRequest);
+    callback(resp);
+    co_return;
+  }
+
+  std::string content = (*json)["content"].asString();
   // Extract new fields
   bool is_product_request = json->isMember("is_product_request")
                                 ? (*json)["is_product_request"].asBool()
@@ -206,6 +219,17 @@ Task<> Community::get_post_by_id(
   auto db = app().getDbClient();
   std::string current_user_id =
       req->getAttributes()->get<std::string>("current_user_id");
+
+  // Validation: Malformed route
+  if (!convert::string_to_int(id).has_value() ||
+      convert::string_to_int(id).value() < 0) {
+    Json::Value error;
+    error["error"] = "Invalid ID";
+    auto resp = HttpResponse::newHttpJsonResponse(error);
+    resp->setStatusCode(k400BadRequest);
+    callback(resp);
+    co_return;
+  }
 
   try {
     auto result = co_await db->execSqlCoro(
@@ -465,6 +489,21 @@ Task<> Community::update_post(
     std::string content = has_content ? (*json)["content"].asString() : "";
     std::string request_status =
         has_request_status ? (*json)["request_status"].asString() : "";
+
+    // Validation: correct statuses include: open, cancelled, fulfilled,
+    // in_progress,
+    if (request_status != "open" && request_status != "in_progress" &&
+        request_status != "cancelled" &&
+        (request_status != "" && has_request_status) &&
+        request_status != "fulfilled") {
+      Json::Value error;
+      error["error"] = "Invalid request status";
+      auto resp = HttpResponse::newHttpJsonResponse(error);
+      resp->setStatusCode(k400BadRequest);
+      callback(resp);
+      co_return;
+    }
+
     std::string location = has_location ? (*json)["location"].asString() : "";
     std::string price_range =
         has_price_range ? (*json)["price_range"].asString() : "";
@@ -632,7 +671,7 @@ Task<> Community::filter_posts(
                                  std::to_string(offset)      // $3: offset
         );
 
-    Json::Value posts;
+    Json::Value posts{Json::arrayValue};
     for (const auto& row : result) {
       Json::Value post;
       post["id"] = row["id"].as<int>();
@@ -655,7 +694,6 @@ Task<> Community::filter_posts(
 
       posts.append(post);
     }
-
     auto resp = HttpResponse::newHttpJsonResponse(posts);
     callback(resp);
   } catch (const DrogonDbException& e) {

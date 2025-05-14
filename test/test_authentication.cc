@@ -6,7 +6,7 @@
 #include <string>
 
 DROGON_TEST(AuthenticationTest) {
-// Setup test database connection
+  // Setup test database connection
   auto db_client = drogon::app().getDbClient();
 
   // Clean up any test data from previous runs

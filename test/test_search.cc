@@ -34,8 +34,8 @@ DROGON_TEST(SearchTest) {
   REQUIRE(register_resp.second->getStatusCode() == drogon::k200OK);
 
   auto response_json = register_resp.second->getJsonObject();
-  REQUIRE((*response_json)["status"].asString() == "success");
-  REQUIRE((*response_json)["token"].asString().length() > 0);
+  CHECK((*response_json)["status"].asString() == "success");
+  CHECK((*response_json)["token"].asString().length() > 0);
 
   std::string token = (*response_json)["token"].asString();
 
@@ -68,10 +68,10 @@ DROGON_TEST(SearchTest) {
   search_order_req->addHeader("Authorization", "Bearer " + token);
 
   auto search_order_resp = client->sendRequest(search_order_req);
-  REQUIRE(search_order_resp.second->getStatusCode() == drogon::k200OK);
+  CHECK(search_order_resp.second->getStatusCode() == drogon::k200OK);
 
   auto search_order_json = search_order_resp.second->getJsonObject();
-  REQUIRE(search_order_json->isArray());
+  CHECK(search_order_json->isArray());
 
   bool found_order = false;
   for (const auto& result : *search_order_json) {
@@ -82,7 +82,7 @@ DROGON_TEST(SearchTest) {
       break;
     }
   }
-  REQUIRE(found_order);
+  CHECK(found_order);
 
   // Test 2: Search for post by content
   auto search_post_req = drogon::HttpRequest::newHttpRequest();
@@ -91,10 +91,10 @@ DROGON_TEST(SearchTest) {
   search_post_req->addHeader("Authorization", "Bearer " + token);
 
   auto search_post_resp = client->sendRequest(search_post_req);
-  REQUIRE(search_post_resp.second->getStatusCode() == drogon::k200OK);
+  CHECK(search_post_resp.second->getStatusCode() == drogon::k200OK);
 
   auto searchPostJson = search_post_resp.second->getJsonObject();
-  REQUIRE(searchPostJson->isArray());
+  CHECK(searchPostJson->isArray());
 
   bool found_post = false;
   for (const auto& result : *searchPostJson) {
@@ -105,7 +105,7 @@ DROGON_TEST(SearchTest) {
       break;
     }
   }
-  REQUIRE(found_post);
+  CHECK(found_post);
 
   // Test 3: Search with empty query should return empty results
   auto empty_search_req = drogon::HttpRequest::newHttpRequest();
@@ -114,11 +114,11 @@ DROGON_TEST(SearchTest) {
   empty_search_req->addHeader("Authorization", "Bearer " + token);
 
   auto empty_search_resp = client->sendRequest(empty_search_req);
-  REQUIRE(empty_search_resp.second->getStatusCode() == drogon::k200OK);
+  CHECK(empty_search_resp.second->getStatusCode() == drogon::k200OK);
 
   auto empty_search_json = empty_search_resp.second->getJsonObject();
-  REQUIRE(empty_search_json->isArray());
-  REQUIRE(empty_search_json->size() == 0);
+  CHECK(empty_search_json->isArray());
+  CHECK(empty_search_json->size() == 0);
 
   // Test 4: Search with non-existent term should return empty results
   auto non_existent_search_req = drogon::HttpRequest::newHttpRequest();
@@ -127,12 +127,12 @@ DROGON_TEST(SearchTest) {
   non_existent_search_req->addHeader("Authorization", "Bearer " + token);
 
   auto non_existent_search_resp = client->sendRequest(non_existent_search_req);
-  REQUIRE(non_existent_search_resp.second->getStatusCode() == drogon::k200OK);
+  CHECK(non_existent_search_resp.second->getStatusCode() == drogon::k200OK);
 
   auto non_existent_search_json =
       non_existent_search_resp.second->getJsonObject();
-  REQUIRE(non_existent_search_json->isArray());
-  REQUIRE(non_existent_search_json->size() == 0);
+  CHECK(non_existent_search_json->isArray());
+  CHECK(non_existent_search_json->size() == 0);
 
   // Test 5: Search without authentication should fail
   auto unauth_search_req = drogon::HttpRequest::newHttpRequest();
@@ -140,8 +140,7 @@ DROGON_TEST(SearchTest) {
   unauth_search_req->setPath("/api/v1/search?query=test");
 
   auto unauth_search_resp = client->sendRequest(unauth_search_req);
-  REQUIRE(unauth_search_resp.second->getStatusCode() ==
-          drogon::k401Unauthorized);
+  CHECK(unauth_search_resp.second->getStatusCode() == drogon::k401Unauthorized);
 
   // Clean up test data
   REQUIRE_NOTHROW(db_client->execSqlSync(
