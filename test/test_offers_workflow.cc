@@ -18,7 +18,7 @@ DROGON_TEST(OffersWorkflowTest) {
       "users WHERE username = 'testoffer1' OR username = 'testoffer2' OR "
       "username = 'testoffer3')"));
   REQUIRE_NOTHROW(db_client->execSqlSync(
-      "DELETE FROM conversations WHERE name LIKE 'Test Offer Conversation%'"));
+      "DELETE FROM conversations WHERE name LIKE 'Offer%'"));
   REQUIRE_NOTHROW(
       db_client->execSqlSync("DELETE FROM price_negotiations WHERE offer_id IN "
                              "(SELECT id FROM offers WHERE "
@@ -750,7 +750,7 @@ DROGON_TEST(OffersWorkflowTest) {
       "users WHERE username = 'testoffer1' OR username = 'testoffer2' OR "
       "username = 'testoffer3')"));
   REQUIRE_NOTHROW(db_client->execSqlSync(
-      "DELETE FROM conversations WHERE name LIKE 'Test Offer Conversation%'"));
+      "DELETE FROM conversations WHERE name LIKE 'Offer%'"));
   REQUIRE_NOTHROW(
       db_client->execSqlSync("DELETE FROM price_negotiations WHERE offer_id IN "
                              "(SELECT id FROM offers WHERE "
