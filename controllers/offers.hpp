@@ -17,11 +17,9 @@ class Offers : public drogon::HttpController<Offers> {
   ADD_METHOD_TO(Offers::create_offer, "/api/v1/posts/{post_id}/offers", Post,
                 Options, "CorsMiddleware", "AuthMiddleware");
 
-  // Get a specific offer
   ADD_METHOD_TO(Offers::get_offer, "/api/v1/offers/{id}", Get, Options,
                 "CorsMiddleware", "AuthMiddleware");
 
-  // Update an offer
   ADD_METHOD_TO(Offers::update_offer, "/api/v1/offers/{id}", Put, Options,
                 "CorsMiddleware", "AuthMiddleware");
 
@@ -54,13 +52,10 @@ class Offers : public drogon::HttpController<Offers> {
                 "/api/v1/offers/notifications/{id}/read", Post, Options,
                 "CorsMiddleware", "AuthMiddleware");
 
-  // Mark all notifications as read
   ADD_METHOD_TO(Offers::mark_all_notifications_read,
                 "/api/v1/offers/notifications/read-all", Post, Options,
                 "CorsMiddleware", "AuthMiddleware");
 
-  // negotiations offers
-  // Add these new methods to the METHOD_LIST_BEGIN section
   ADD_METHOD_TO(Offers::negotiate_offer, "/api/v1/offers/{id}/negotiate", Post,
                 Options, "CorsMiddleware", "AuthMiddleware");
 

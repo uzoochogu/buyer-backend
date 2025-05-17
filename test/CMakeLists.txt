@@ -11,6 +11,8 @@ add_executable(${PROJECT_NAME}
   test_users.cc
   test_orders.cc
   test_dashboard.cc
+  test_offers_workflow.cc
+  test_proofs_and_escrow.cc
 )
 
 # ##############################################################################

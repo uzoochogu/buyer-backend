@@ -180,3 +180,17 @@ psql -U postgres -d agentbackend -f seeds/001_complete_seed_data.sql
 # for test DB ( or auto-seed using the configure_tests cmake target)
 psqll -U postgres -d buyer_app_test -f seeds/001_complete_seed_data.sql
 ```
+
+## Debugging tips
+* If you are getting a 500 error instead of a 400 error, then you are not validating the data coming from the request (body and Headers).
+* If you are getting 200 or 201 error when you aren't supposed to, then you are not validating your input data. Maybe empty data?
+* Note where you put logs, putting logs in the test side outputs in the test run, logs in the normal application outputs in the server logs
+* Try to initialize the Json values as much as possible. Especially Array responses.
+* Using the `["key"]` accessor in JsonCpp default constructs that field if it doesn't exists, prefer `.isMember("key")` to check for membership.
+* If you want to inspect the Database after a test run, remove the teardown delete queries, recompile and rerun tests. This way you have access to it after a run for more better investigations.
+* Use Drogon LOG_INFO and LOG_ERROR macros for logging. For Json responses this helps: 
+```cpp
+  LOG_INFO << json_response.toStyledString();
+  // or use .type() to check e.g.
+  if (json_response.type() == Json::ValueType::objectValue)
+```

@@ -477,12 +477,9 @@ Task<> Offers::accept_offer(
     try {
       // Update the accepted offer
       auto update_result = co_await trans->execSqlCoro(
-          "UPDATE offers SET status = 'accepted', updated_at = NOW() WHERE "
-          "id = $1",
+          "UPDATE offers SET status = 'accepted', negotiation_status = "
+          "'completed', updated_at = NOW() WHERE id = $1",
           std::stoi(id));
-
-      // Update message metadata for the accepted offer
-      update_message_metadata(trans, id, "accepted");
 
       // Get the latest price negotiation for this offer (if any) and accept it
       auto negotiation_result = co_await trans->execSqlCoro(
@@ -528,9 +525,9 @@ Task<> Offers::accept_offer(
 
         // Continue with rejecting other offers
         auto rejected_offers_result = co_await trans->execSqlCoro(
-            "UPDATE offers SET status = 'rejected', updated_at = NOW() "
-            "WHERE post_id = $1 AND id != $2 AND status = 'pending' "
-            "RETURNING id",
+            "UPDATE offers SET status = 'rejected', negotiation_status = "
+            "'completed', updated_at = NOW() WHERE post_id = $1 AND id != $2 "
+            "AND status = 'pending' RETURNING id",
             post_id, std::stoi(id));
 
         // Update message metadata for all rejected offers
@@ -599,23 +596,11 @@ Task<> Offers::accept_offer(
             post_id);
       }
 
-      // commit callback with rollback for extra redundancy
-      trans->setCommitCallback([callback, trans](bool committed) {
-        if (committed) {
-          Json::Value ret;
-          ret["status"] = "success";
-          ret["message"] = "Offer accepted successfully";
-          auto resp = HttpResponse::newHttpJsonResponse(ret);
-          callback(resp);
-        } else {
-          trans->rollback();
-          Json::Value error;
-          error["error"] = "Failed to commit transaction";
-          auto resp = HttpResponse::newHttpJsonResponse(error);
-          resp->setStatusCode(k500InternalServerError);
-          callback(resp);
-        }
-      });
+      Json::Value ret;
+      ret["status"] = "success";
+      ret["message"] = "Offer accepted successfully";
+      auto resp = HttpResponse::newHttpJsonResponse(ret);
+      callback(resp);
     } catch (const DrogonDbException& e) {
       LOG_ERROR << "Database error: " << e.base().what();
       trans->rollback();
@@ -723,7 +708,7 @@ Task<> Offers::accept_counter_offer(
       // Update the accepted offer with the latest negotiated price
       co_await trans->execSqlCoro(
           "UPDATE offers SET status = 'accepted', price = $2, "
-          "updated_at = NOW() WHERE id = $1",
+          "negotiation_status = 'completed', updated_at = NOW() WHERE id = $1",
           std::stoi(id), latest_price);
 
       // Update message metadata for the accepted offer
@@ -757,9 +742,10 @@ Task<> Offers::accept_counter_offer(
 
       // Reject all other offers for this post
       auto rejected_offers_result = co_await trans->execSqlCoro(
-          "UPDATE offers SET status = 'rejected', updated_at = NOW() "
-          "WHERE post_id = $1 AND id != $2 AND status = 'pending' "
-          "RETURNING id",
+          "UPDATE offers SET status = 'rejected', negotiation_status = "
+          "'completed', updated_at = NOW()"
+          "WHERE post_id = $1 AND id != $2 AND status = 'pending' RETURNING "
+          "id ",
           post_id, std::stoi(id));
 
       // Update message metadata for rejected offers
@@ -791,23 +777,11 @@ Task<> Offers::accept_counter_offer(
           "UPDATE posts SET request_status = 'fulfilled' WHERE id = $1",
           post_id);
 
-      trans->setCommitCallback([callback](bool committed) {
-        if (committed) {
-          Json::Value ret;
-          ret["status"] = "success";
-          ret["message"] = "Counter-offer accepted successfully";
-          auto resp = HttpResponse::newHttpJsonResponse(ret);
-          callback(resp);
-        } else {
-          Json::Value error;
-          error["error"] = "Failed to commit transaction";
-          auto resp = HttpResponse::newHttpJsonResponse(error);
-          resp->setStatusCode(k500InternalServerError);
-          callback(resp);
-        }
-      });
-
-      // commit attempted here
+      Json::Value ret;
+      ret["status"] = "success";
+      ret["message"] = "Counter-offer accepted successfully";
+      auto resp = HttpResponse::newHttpJsonResponse(ret);
+      callback(resp);
     } catch (const DrogonDbException& e) {
       LOG_ERROR << "Database error: " << e.base().what();
       trans->rollback();
@@ -881,8 +855,8 @@ Task<> Offers::reject_offer(
 
     // Update the offer status
     auto update_result = co_await db->execSqlCoro(
-        "UPDATE offers SET status = 'rejected', updated_at = NOW() WHERE "
-        "id = $1",
+        "UPDATE offers SET status = 'rejected', negotiation_status = "
+        "'completed', updated_at = NOW() WHERE id = $1",
         std::stoi(id));
 
     Json::Value ret;
