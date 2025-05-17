@@ -146,28 +146,13 @@ void add_negotiation_message(
       [=](const Result&) {
         LOG_INFO << "Message added successfully, completing transaction";
 
-        // Set commit callback to send response after successful commit
-        transaction->setCommitCallback([=](bool committed) {
-          if (committed) {
-            LOG_INFO << "Transaction committed successfully";
-            Json::Value response;
-            response["status"] = "success";
-            response["message"] = "Negotiation started";
-            response["negotiation_id"] = negotiation_id;
-            response["conversation_id"] = conversation_id;
-
-            auto resp = HttpResponse::newHttpJsonResponse(response);
-            callback(resp);
-          } else {
-            transaction->rollback();
-            LOG_ERROR << "Transaction failed to commit";
-            Json::Value error;
-            error["error"] = "Failed to complete negotiation";
-            auto resp = HttpResponse::newHttpJsonResponse(error);
-            resp->setStatusCode(k500InternalServerError);
-            callback(resp);
-          }
-        });
+        Json::Value response;
+        response["status"] = "success";
+        response["message"] = "Negotiation started";
+        response["negotiation_id"] = negotiation_id;
+        response["conversation_id"] = conversation_id;
+        auto resp = HttpResponse::newHttpJsonResponse(response);
+        callback(resp);
       },
       [=](const DrogonDbException& e) {
         LOG_ERROR << "Database error adding message: " << e.base().what();
@@ -321,32 +306,15 @@ Task<> Offers::negotiate_offer(
           std::stoi(conversation_id), std::stoi(current_user_id),
           negotiation_message, negotiation_id, metadata_str);
 
-      LOG_INFO << "Message queued to be added, committing transaction...";
+      Json::Value response;
+      response["status"] = "success";
+      response["message"] = "Negotiation started";
+      response["negotiation_id"] = negotiation_id;
+      response["conversation_id"] = conversation_id;
 
-      // commit callback for extra redundancy
-      transaction->setCommitCallback([=](bool committed) {
-        if (committed) {
-          LOG_INFO << "Transaction committed successfully";
-          Json::Value response;
-          response["status"] = "success";
-          response["message"] = "Negotiation started";
-          response["negotiation_id"] = negotiation_id;
-          response["conversation_id"] = conversation_id;
-
-          auto resp = HttpResponse::newHttpJsonResponse(response);
-          callback(resp);
-        } else {
-          LOG_ERROR << "Transaction failed to commit, connection shutdown "
-                       "during commit?";
-          transaction->rollback();
-          Json::Value error;
-          error["error"] = "Failed to complete negotiation";
-          auto resp = HttpResponse::newHttpJsonResponse(error);
-          resp->setStatusCode(k500InternalServerError);
-          callback(resp);
-        }
-      });
-      // The transaction will attempt to be committed here
+      auto resp = HttpResponse::newHttpJsonResponse(response);
+      callback(resp);
+      LOG_INFO << "Negotiation Transaction committed successfully";
     } catch (const DrogonDbException& e) {
       LOG_ERROR << "Database error in transaction: " << e.base().what();
       transaction->rollback();

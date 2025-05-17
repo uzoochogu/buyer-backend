@@ -567,10 +567,15 @@ FodyWeavers.xsd
 build/
 models/
 
+# Configurations
 config.json
+test_config.json
 models/model.json
 
 tools/
 scrap/
 .env
 .env.cmake
+
+# Scripts
+scripts/setup_test_db.*

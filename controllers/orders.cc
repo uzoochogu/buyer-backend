@@ -25,7 +25,7 @@ Task<> Orders::get_orders(
     auto result =
         co_await db->execSqlCoro("SELECT * FROM orders ORDER BY id DESC");
 
-    Json::Value orders;
+    Json::Value orders{Json::arrayValue};
     for (const auto& row : result) {
       Json::Value order;
       order["id"] = row["id"].as<int>();
