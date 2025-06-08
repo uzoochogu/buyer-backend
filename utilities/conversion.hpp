@@ -1,5 +1,5 @@
-#ifndef UTILITIES_HPP
-#define UTILITIES_HPP
+#ifndef CONVERSION_HPP
+#define CONVERSION_HPP
 
 #include <charconv>
 #include <optional>

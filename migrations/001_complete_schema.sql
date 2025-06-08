@@ -131,17 +131,68 @@ CREATE TABLE escrow_transactions (
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
+-- tables for Notifications
+CREATE TABLE user_subscriptions (
+    id SERIAL PRIMARY KEY,
+    user_id INTEGER REFERENCES users (id),
+    subscription VARCHAR(255) NOT NULL,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE (user_id, subscription)
+);
+
+CREATE TYPE notification_type AS ENUM (
+    'post_created',
+    'post_updated',
+
+    'offer_created',
+    'offer_updated',
+    'offer_negotiated',
+    'offer_accepted',
+    'offer_rejected',
+
+    'chat_created',
+    'message_sent',
+    'unknown'
+    -- Add more types as needed
+);
+
+CREATE TABLE notifications (
+    id SERIAL PRIMARY KEY,
+    user_id INTEGER REFERENCES users (id),
+    type notification_type NOT NULL,
+    message TEXT NOT NULL,
+    metadata JSONB,
+    is_read BOOLEAN DEFAULT FALSE,
+    read_at TIMESTAMP,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
 -- Indexes from 002_enhance_posts.sql
 CREATE INDEX posts_tags_idx ON posts USING GIN (tags);
 
 -- Indexes from 003_create_offers_table.sql
 CREATE INDEX offers_post_id_idx ON offers (post_id);
+
 CREATE INDEX offers_user_id_idx ON offers (user_id);
+
 CREATE INDEX offer_notifications_user_id_idx ON offer_notifications (user_id);
+
 CREATE INDEX offer_notifications_is_read_idx ON offer_notifications (is_read);
 
 -- Indexes from 004_negotiation_and_product_proof.sql
 CREATE INDEX product_proofs_offer_id_idx ON product_proofs (offer_id);
+
 CREATE INDEX price_negotiations_offer_id_idx ON price_negotiations (offer_id);
+
 CREATE INDEX escrow_transactions_offer_id_idx ON escrow_transactions (offer_id);
+
 CREATE INDEX messages_context_idx ON messages (context_type, context_id);
+
+-- Indexes from notifications
+CREATE INDEX user_subscriptions_user_id_idx ON user_subscriptions (user_id);
+
+CREATE INDEX notifications_user_id_idx ON notifications (user_id);
+
+CREATE INDEX notifications_is_read_idx ON notifications (is_read);
+
+CREATE INDEX notifications_created_at_idx ON notifications (created_at);

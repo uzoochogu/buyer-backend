@@ -11,7 +11,6 @@ Internal development guide for the buyer backend service.
 
 Please note working directory and relative paths differs based on build system e.g. MSVC uses Debug/Release folders
 
-
 ## Installing Dependencies
 
 Install Postgres on your test machine, either [locally](https://www.postgresql.org/download/) or through [docker](https://hub.docker.com/_/postgres).
@@ -33,7 +32,7 @@ Installing using vcpkg
 ./vcpkg install argon2[hwopt,tool]:triplet_name
 ```
 
-More information on setting up the drogon-ctl tool can be found [here](https://github.com/drogonframework/drogon/wiki/ENG-02-Installation#Drogon-Installation)
+More information on setting up the drogon-ctl tool can be found [in this guide](https://github.com/drogonframework/drogon/wiki/ENG-02-Installation#Drogon-Installation)
 
 ### Compilation
 

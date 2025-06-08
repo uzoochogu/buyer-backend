@@ -20,6 +20,8 @@ add_executable(${PROJECT_NAME} main.cc)
 # target_link_libraries(${PROJECT_NAME} PRIVATE drogon)
 #
 # and comment out the following line
+find_package(boost_uuid REQUIRED CONFIG)
+find_package(cppzmq CONFIG REQUIRED)
 find_package(Drogon CONFIG REQUIRED)
 find_package(jwt-cpp CONFIG REQUIRED)
 find_package(unofficial-argon2 CONFIG REQUIRED)
@@ -27,6 +29,8 @@ find_package(unofficial-argon2 CONFIG REQUIRED)
 target_link_libraries(${PROJECT_NAME} PRIVATE Drogon::Drogon 
                                               jwt-cpp::jwt-cpp 
                                               unofficial::argon2::libargon2
+                                              cppzmq cppzmq-static
+                                              Boost::uuid                
                       )
 
 # ##############################################################################

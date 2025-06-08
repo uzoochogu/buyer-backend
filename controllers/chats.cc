@@ -12,6 +12,10 @@
 #include <drogon/orm/Row.h>
 #include <drogon/orm/SqlBinder.h>
 
+#include "../services/service_manager.hpp"
+#include "../services/subber/connection_manager.hpp"
+#include "../services/subber/pub_manager.hpp"
+#include "../services/subber/sub_manager.hpp"
 #include "../utilities/conversion.hpp"
 
 using namespace drogon;
@@ -119,10 +123,14 @@ Task<> Chats::create_conversation(
     } else {
       // Create new conversation
       auto insert_result = co_await db->execSqlCoro(
-          "INSERT INTO conversations (name) VALUES ($1) RETURNING id", name);
+          "INSERT INTO conversations (name) VALUES ($1) RETURNING id, "
+          "created_at",
+          name);
 
       if (insert_result.size() > 0) {
         int conversation_id = insert_result[0]["id"].as<int>();
+        std::string conversation_id_str =
+            insert_result[0]["id"].as<std::string>();
 
         // Add participants
         try {
@@ -130,6 +138,34 @@ Task<> Chats::create_conversation(
               "INSERT INTO conversation_participants (conversation_id, "
               "user_id) VALUES ($1, $2), ($1, $3)",
               conversation_id, std::stoi(user_id), other_user_id);
+
+          // notification
+          std::string conversation_topic =
+              create_topic("chat", conversation_id_str);
+          std::string other_user_id_str = std::to_string(other_user_id);
+          ServiceManager::get_instance().get_subscriber().subscribe(
+              conversation_topic);
+          ServiceManager::get_instance().get_connection_manager().subscribe(
+              conversation_topic, user_id);
+          ServiceManager::get_instance().get_connection_manager().subscribe(
+              conversation_topic, other_user_id_str);
+          store_user_subscription(user_id, conversation_topic);
+          store_user_subscription(other_user_id_str, conversation_topic);
+          LOG_INFO << "User " << user_id << " and " << other_user_id_str
+                   << " subscribed to conversation topic: "
+                   << conversation_topic;
+
+          Json::Value data_json;
+          data_json["type"] = "chat_created";
+          data_json["id"] = conversation_id_str;
+          data_json["message"] = "New Conversation created";
+          data_json["modified_at"] =
+              insert_result[0]["created_at"].as<std::string>();
+
+          Json::FastWriter writer;
+          std::string data = writer.write(data_json);
+          ServiceManager::get_instance().get_publisher().publish(
+              conversation_topic, data);
 
           Json::Value ret;
           ret["status"] = "success";
@@ -295,6 +331,21 @@ Task<> Chats::send_message(HttpRequestPtr req,
         std::stoi(conversation_id), std::stoi(user_id), content);
 
     if (insert_result.size() > 0) {
+      // notification
+      std::string chat_topic = create_topic("chat", conversation_id);
+
+      Json::Value chat_data_json;
+      chat_data_json["type"] = "message_sent";
+      chat_data_json["id"] = conversation_id;
+      chat_data_json["message"] = "New message";
+      chat_data_json["modified_at"] =
+          insert_result[0]["created_at"].as<std::string>();
+
+      Json::FastWriter writer;
+      std::string chat_data = writer.write(chat_data_json);
+
+      ServiceManager::get_instance().get_publisher().publish(chat_topic,
+                                                             chat_data);
       Json::Value ret;
       ret["status"] = "success";
       ret["message_id"] = insert_result[0]["id"].as<int>();

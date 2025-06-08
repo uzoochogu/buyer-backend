@@ -16,6 +16,10 @@
 #include <string>
 #include <vector>
 
+#include "../services/service_manager.hpp"
+#include "../services/subber/connection_manager.hpp"
+#include "../services/subber/pub_manager.hpp"
+#include "../services/subber/sub_manager.hpp"
 #include "offers.hpp"
 
 using namespace drogon;
@@ -244,7 +248,7 @@ Task<> Offers::negotiate_offer(
           "INSERT INTO price_negotiations "
           "(offer_id, user_id, proposed_price, message) "
           "VALUES ($1, $2, $3, $4) "
-          "RETURNING id",
+          "RETURNING id, created_at",
           std::stoi(id), std::stoi(current_user_id), proposed_price, message);
 
       if (neg_result.size() == 0) {
@@ -306,6 +310,20 @@ Task<> Offers::negotiate_offer(
           std::stoi(conversation_id), std::stoi(current_user_id),
           negotiation_message, negotiation_id, metadata_str);
 
+      std::string offer_topic = create_topic("offer", id);
+
+      Json::Value offer_data_json;
+      offer_data_json["type"] = "offer_negotiated";
+      offer_data_json["id"] = id;
+      offer_data_json["message"] = "New Negotiation for your offer";
+      offer_data_json["modified_at"] =
+          neg_result[0]["created_at"].as<std::string>();
+
+      std::string offer_data = writer.write(offer_data_json);
+
+      // Publish to offer subscribers
+      ServiceManager::get_instance().get_publisher().publish(offer_topic,
+                                                             offer_data);
       Json::Value response;
       response["status"] = "success";
       response["message"] = "Negotiation started";

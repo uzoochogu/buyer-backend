@@ -15,6 +15,11 @@
 #include <string>
 #include <vector>
 
+#include "../services/service_manager.hpp"
+#include "../services/subber/connection_manager.hpp"
+#include "../services/subber/pub_manager.hpp"
+#include "../services/subber/sub_manager.hpp"
+
 using namespace drogon;
 using namespace drogon::orm;
 using namespace api::v1;
@@ -165,6 +170,35 @@ Task<> Offers::create_offer(
             "INSERT INTO offer_notifications (offer_id, user_id, is_read) "
             "VALUES ($1, $2, FALSE)",
             offer_id, post_user_id);
+
+        // notification:
+
+        // Auto-subscribe offer owner to their offer
+        std::string offer_topic =
+            create_topic("offer", insert_result[0]["id"].as<std::string>());
+        ServiceManager::get_instance().get_subscriber().subscribe(offer_topic);
+        ServiceManager::get_instance().get_connection_manager().subscribe(
+            offer_topic, current_user_id);
+        store_user_subscription(current_user_id, offer_topic);
+        LOG_INFO << "User " << current_user_id
+                 << " subscribed to offer topic: " << offer_topic;
+
+        // create offer data
+        Json::Value offer_data_json;
+        offer_data_json["type"] = "offer_created";
+        offer_data_json["id"] = offer_id;
+        offer_data_json["message"] = "New Offer Request for your Post ";
+        offer_data_json["modified_at"] =
+            insert_result[0]["created_at"].as<std::string>();
+
+        Json::FastWriter writer;
+        std::string offer_data = writer.write(offer_data_json);
+
+        // publish to post topic
+        std::string post_topic = create_topic("post", post_id);
+        ServiceManager::get_instance().get_publisher().publish(post_topic,
+                                                               offer_data);
+        LOG_INFO << "Published new offer to post channel: " << post_topic;
 
         Json::Value ret;
         ret["status"] = "success";
@@ -343,11 +377,25 @@ Task<> Offers::update_offer(
         "is_public = CASE WHEN $8 THEN $9 ELSE is_public END, "
         "updated_at = NOW() "
         "WHERE id = $1 "
-        "RETURNING id",
+        "RETURNING id, updated_at",
         std::stoi(id), has_title, title, has_description, description,
         has_price, price, has_is_public, is_public);
 
     if (update_result.size() > 0) {
+      // notification
+      std::string offer_topic = create_topic("offer", id);
+      Json::Value offer_data_json;
+      offer_data_json["type"] = "offer_updated";
+      offer_data_json["id"] = id;
+      offer_data_json["message"] = "Offer updated";
+      offer_data_json["modified_at"] =
+          update_result[0]["updated_at"].as<std::string>();
+
+      Json::FastWriter writer;
+      std::string offer_data = writer.write(offer_data_json);
+
+      ServiceManager::get_instance().get_publisher().publish(offer_topic,
+                                                             offer_data);
       Json::Value ret;
       ret["status"] = "success";
       ret["message"] = "Offer updated successfully";
@@ -478,7 +526,8 @@ Task<> Offers::accept_offer(
       // Update the accepted offer
       auto update_result = co_await trans->execSqlCoro(
           "UPDATE offers SET status = 'accepted', negotiation_status = "
-          "'completed', updated_at = NOW() WHERE id = $1",
+          "'completed', updated_at = NOW() WHERE id = $1 "
+          "RETURNING updated_at",
           std::stoi(id));
 
       // Get the latest price negotiation for this offer (if any) and accept it
@@ -487,6 +536,8 @@ Task<> Offers::accept_offer(
           "WHERE offer_id = $1 AND status = 'pending' "
           "ORDER BY created_at DESC LIMIT 1",
           std::stoi(id));
+
+      drogon::orm::Result rejected_offers_result;
 
       // If there are pending negotiations, accept the latest one and reject
       // others
@@ -517,22 +568,21 @@ Task<> Offers::accept_offer(
 
         // Update message metadata for rejected negotiations
         for (const auto& row : other_negotiations_result) {
-          std::string rejected_negotiation_id =
-              std::to_string(row["id"].as<int>());
+          std::string rejected_negotiation_id = row["id"].as<std::string>();
           update_message_metadata(trans, rejected_negotiation_id, "rejected",
                                   true);
         }
 
         // Continue with rejecting other offers
-        auto rejected_offers_result = co_await trans->execSqlCoro(
+        rejected_offers_result = co_await trans->execSqlCoro(
             "UPDATE offers SET status = 'rejected', negotiation_status = "
             "'completed', updated_at = NOW() WHERE post_id = $1 AND id != $2 "
-            "AND status = 'pending' RETURNING id",
+            "AND status = 'pending' RETURNING id, updated_at",
             post_id, std::stoi(id));
 
         // Update message metadata for all rejected offers
         for (const auto& row : rejected_offers_result) {
-          std::string rejected_offer_id = std::to_string(row["id"].as<int>());
+          std::string rejected_offer_id = row["id"].as<std::string>();
           update_message_metadata(trans, rejected_offer_id, "rejected");
         }
 
@@ -548,8 +598,7 @@ Task<> Offers::accept_offer(
 
         // Update message metadata for rejected negotiations from other offers
         for (const auto& row : rejected_negotiations_result) {
-          std::string rejected_negotiation_id =
-              std::to_string(row["id"].as<int>());
+          std::string rejected_negotiation_id = row["id"].as<std::string>();
           update_message_metadata(trans, rejected_negotiation_id, "rejected",
                                   true);
         }
@@ -568,7 +617,7 @@ Task<> Offers::accept_offer(
 
         // Update message metadata for all rejected offers
         for (const auto& row : rejected_offers_result) {
-          std::string rejected_offer_id = std::to_string(row["id"].as<int>());
+          std::string rejected_offer_id = row["id"].as<std::string>();
           update_message_metadata(trans, rejected_offer_id, "rejected");
         }
 
@@ -595,6 +644,45 @@ Task<> Offers::accept_offer(
             "UPDATE posts SET request_status = 'fulfilled' WHERE id = $1",
             post_id);
       }
+
+      // notify only after a successful commit
+      // notify the accepted offer
+      std::string offer_topic = create_topic("offer", id);
+      // create offer data
+      Json::Value offer_data_json;
+      offer_data_json["type"] = "offer_accepted";
+      offer_data_json["id"] = id;
+      offer_data_json["message"] = "Offer was accepted";
+      offer_data_json["modified_at"] =
+          update_result[0]["updated_at"].as<std::string>();
+
+      Json::FastWriter writer;
+      std::string offer_data = writer.write(offer_data_json);
+
+      // Publish to offer subscribers
+      ServiceManager::get_instance().get_publisher().publish(offer_topic,
+                                                             offer_data);
+
+      // notify rejected offers
+      for (const auto& row : rejected_offers_result) {
+        std::string rejected_offer_id = row["id"].as<std::string>();
+
+        offer_topic = create_topic("offer", rejected_offer_id);
+
+        // create offer data
+        offer_data_json["type"] = "offer_rejected";
+        offer_data_json["id"] = rejected_offer_id;
+        offer_data_json["message"] = "Offer was rejected";
+        offer_data_json["modified_at"] =
+            rejected_offers_result[0]["updated_at"].as<std::string>();
+
+        offer_data = writer.write(offer_data_json);
+
+        ServiceManager::get_instance().get_publisher().publish(offer_topic,
+                                                               offer_data);
+      }
+
+      // Delete all offer and subscriptions for that post?
 
       Json::Value ret;
       ret["status"] = "success";
@@ -706,9 +794,10 @@ Task<> Offers::accept_counter_offer(
       double latest_price = price_result[0]["proposed_price"].as<double>();
 
       // Update the accepted offer with the latest negotiated price
-      co_await trans->execSqlCoro(
+      auto update_result = co_await trans->execSqlCoro(
           "UPDATE offers SET status = 'accepted', price = $2, "
-          "negotiation_status = 'completed', updated_at = NOW() WHERE id = $1",
+          "negotiation_status = 'completed', updated_at = NOW() WHERE id = $1 "
+          "RETURNING updated_at",
           std::stoi(id), latest_price);
 
       // Update message metadata for the accepted offer
@@ -734,8 +823,7 @@ Task<> Offers::accept_counter_offer(
 
       // Update message metadata for rejected negotiations
       for (const auto& row : rejected_negotiations_result) {
-        std::string rejected_negotiation_id =
-            std::to_string(row["id"].as<int>());
+        std::string rejected_negotiation_id = row["id"].as<std::string>();
         update_message_metadata(trans, rejected_negotiation_id, "rejected",
                                 true);
       }
@@ -745,12 +833,12 @@ Task<> Offers::accept_counter_offer(
           "UPDATE offers SET status = 'rejected', negotiation_status = "
           "'completed', updated_at = NOW()"
           "WHERE post_id = $1 AND id != $2 AND status = 'pending' RETURNING "
-          "id ",
+          "id, updated_at",
           post_id, std::stoi(id));
 
       // Update message metadata for rejected offers
       for (const auto& row : rejected_offers_result) {
-        std::string rejected_offer_id = std::to_string(row["id"].as<int>());
+        std::string rejected_offer_id = row["id"].as<std::string>();
         update_message_metadata(trans, rejected_offer_id, "rejected");
       }
 
@@ -766,8 +854,7 @@ Task<> Offers::accept_counter_offer(
 
       // Update message metadata for rejected negotiations from other offers
       for (const auto& row : other_negotiations_result) {
-        std::string rejected_negotiation_id =
-            std::to_string(row["id"].as<int>());
+        std::string rejected_negotiation_id = row["id"].as<std::string>();
         update_message_metadata(trans, rejected_negotiation_id, "rejected",
                                 true);
       }
@@ -776,6 +863,49 @@ Task<> Offers::accept_counter_offer(
       co_await trans->execSqlCoro(
           "UPDATE posts SET request_status = 'fulfilled' WHERE id = $1",
           post_id);
+
+      // notify only after a successful commit
+      // notify the accepted offer
+      std::string offer_topic = create_topic("offer", id);
+      // create offer data
+      Json::Value offer_data_json;
+      offer_data_json["type"] = "offer_accepted";
+      offer_data_json["id"] = id;
+      offer_data_json["message"] = "Offer was accepted";
+      offer_data_json["modified_at"] =
+          update_result[0]["updated_at"].as<std::string>();
+
+      Json::FastWriter writer;
+      std::string offer_data = writer.write(offer_data_json);
+
+      // Publish to offer subscribers
+      ServiceManager::get_instance().get_publisher().publish(offer_topic,
+                                                             offer_data);
+
+      // notify other rejected offers
+      for (const auto& row : rejected_offers_result) {
+        std::string rejected_offer_id = row["id"].as<std::string>();
+
+        offer_topic = create_topic("offer", rejected_offer_id);
+
+        // create offer data
+        offer_data_json["type"] = "offer_rejected";
+        offer_data_json["id"] = rejected_offer_id;
+        offer_data_json["message"] = "Offer was rejected";
+        offer_data_json["modified_at"] =
+            rejected_offers_result[0]["updated_at"].as<std::string>();
+
+        offer_data = writer.write(offer_data_json);
+
+        ServiceManager::get_instance().get_publisher().publish(offer_topic,
+                                                               offer_data);
+      }
+
+      // delete all offers subscriptions for this post?
+      // co_await trans->execSqlCoro(
+      //     "DELETE FROM user_subscriptions WHERE subscription = $1",
+      //     post_topic);
+      //
 
       Json::Value ret;
       ret["status"] = "success";
@@ -856,8 +986,27 @@ Task<> Offers::reject_offer(
     // Update the offer status
     auto update_result = co_await db->execSqlCoro(
         "UPDATE offers SET status = 'rejected', negotiation_status = "
-        "'completed', updated_at = NOW() WHERE id = $1",
+        "'completed', updated_at = NOW() WHERE id = $1 "
+        "RETURNING updated_at",
         std::stoi(id));
+
+    // notify the rejected offer
+    std::string offer_topic = create_topic("offer", id);
+
+    Json::Value offer_data_json;
+    offer_data_json["type"] = "offer_rejected";
+    offer_data_json["id"] = id;
+    offer_data_json["message"] = "Offer was rejected";
+    offer_data_json["modified_at"] =
+        update_result[0]["updated_at"].as<std::string>();
+
+    Json::FastWriter writer;
+    std::string offer_data = writer.write(offer_data_json);
+
+    // Publish to offer subscribers
+    ServiceManager::get_instance().get_publisher().publish(offer_topic,
+                                                           offer_data);
+    LOG_INFO << "Rejected offer: " << offer_topic;
 
     Json::Value ret;
     ret["status"] = "success";

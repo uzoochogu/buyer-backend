@@ -296,6 +296,18 @@ VALUES (1, 1, false),
     (4, 1, false),
     (5, 2, false);
 
+-- Add user subscriptions
+INSERT INTO
+    user_subscriptions (user_id, subscription)
+VALUES  (1, 'electronics'),
+        (1, 'android'),
+        (2, 'iphone'),
+        (2, 'beauty'),
+        (1, 'Lagos'),
+        (2, 'London'),
+        (1, 'chat:1'),
+        (2, 'chat:1');
+
 -- Add sample product proofs
 INSERT INTO
     product_proofs (offer_id, user_id, image_url, description, status)

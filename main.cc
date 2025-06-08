@@ -6,6 +6,9 @@
 #include <string>
 #include <vector>
 
+#include "services/service_manager.hpp"
+
+
 void print_help() {
   std::cout << "Usage: buyer-backend [OPTIONS]\n\n"
                "Options:\n"
@@ -86,6 +89,8 @@ int main(int argc, char* argv[]) {
     return 1;
   }
 
+  ServiceManager::get_instance().initialize();
+
   if (test_mode) {
     drogon::app().getLoop()->queueInLoop([]() {
       std::cout << std::format(
@@ -93,6 +98,9 @@ int main(int argc, char* argv[]) {
           drogon::app().getDbClient()->connectionInfo());
     });
   }
+
   drogon::app().run();
-  return 0;
+
+  // Cleanup on shutdown
+  std::atexit([]() { ServiceManager::get_instance().shutdown(); });
 }

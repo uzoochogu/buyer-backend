@@ -1,3 +1,4 @@
+// #include "../utilities/uuid_generator.hpp"
 #include "community.hpp"
 
 #include <drogon/HttpResponse.h>
@@ -17,7 +18,12 @@
 #include <string>
 #include <vector>
 
+#include "../services/service_manager.hpp"
+#include "../services/subber/connection_manager.hpp"
+#include "../services/subber/pub_manager.hpp"
+#include "../services/subber/sub_manager.hpp"
 #include "../utilities/conversion.hpp"
+#include "../utilities/time_manipulation.hpp"
 
 using namespace drogon;
 using namespace drogon::orm;
@@ -187,9 +193,49 @@ Task<> Community::create_post(
         request_status, price_range);
 
     if (result.size() > 0) {
+      // Notification
+
+      // Auto-subscribe post owner to their post
+      std::string post_id = result[0]["id"].as<std::string>();
+      std::string post_topic = create_topic("post", post_id);
+      ServiceManager::get_instance().get_subscriber().subscribe(post_topic);
+      ServiceManager::get_instance().get_connection_manager().subscribe(
+          post_topic, user_id);
+      store_user_subscription(user_id, post_topic);
+      LOG_INFO << "User " << user_id
+               << " subscribed to post topic: " << post_topic;
+
+      // create post data
+      Json::Value post_data_json;
+      post_data_json["type"] = "post_created";
+      post_data_json["id"] = post_id;
+      post_data_json["message"] =
+          is_product_request ? "New Product Request: " + content : content;
+      post_data_json["modified_at"] = result[0]["created_at"].as<std::string>();
+
+      Json::FastWriter writer;
+      std::string post_data = writer.write(post_data_json);
+
+      // Publish to tag subscribers
+      if (json->isMember("tags") && (*json)["tags"].isArray()) {
+        for (const auto& tag : (*json)["tags"]) {
+          std::string tag_topic = tag.asString();
+          ServiceManager::get_instance().get_publisher().publish(tag_topic,
+                                                                 post_data);
+          LOG_INFO << "Published new post to tag channel: " << tag_topic;
+        }
+      }
+
+      // Publish to location subscribers
+      if (!location.empty()) {
+        ServiceManager::get_instance().get_publisher().publish(location,
+                                                               post_data);
+        LOG_INFO << "Published new post to location channel: " << location;
+      }
+
       Json::Value ret;
       ret["status"] = "success";
-      ret["post_id"] = result[0]["id"].as<int>();
+      ret["post_id"] = result[0]["id"].as<int>();  // post_id
       ret["created_at"] = result[0]["created_at"].as<std::string>();
       auto resp = HttpResponse::newHttpJsonResponse(ret);
       callback(resp);
@@ -537,6 +583,23 @@ Task<> Community::update_post(
     );
 
     if (update_result.size() > 0) {
+      // Send notification here:
+
+      std::string post_topic = create_topic("post", id);
+      Json::Value post_data_json;
+      post_data_json["type"] = "post_updated";
+      post_data_json["id"] = id;
+      post_data_json["message"] = "New update on post";
+      post_data_json["modified_at"] = get_current_utc_timestamp();
+
+      Json::FastWriter writer;
+      std::string post_data = writer.write(post_data_json);
+
+      // Publish to post (owner and post subscribers)
+      ServiceManager::get_instance().get_publisher().publish(post_topic,
+                                                             post_data);
+      LOG_INFO << "Updated post: " << post_topic;
+
       Json::Value ret;
       ret["status"] = "success";
       ret["message"] = "Post updated successfully";
@@ -724,6 +787,13 @@ Task<> Community::subscribe_to_post(
         "RETURNING id",
         std::stoi(current_user_id), std::stoi(id));
 
+    std::string post_id = id;
+    std::string post_topic = create_topic("post", post_id);
+    ServiceManager::get_instance().get_subscriber().subscribe(post_topic);
+    ServiceManager::get_instance().get_connection_manager().subscribe(
+        post_topic, current_user_id);
+    store_user_subscription(current_user_id, post_topic);
+
     Json::Value ret;
     if (result.size() > 0) {
       ret["status"] = "success";
@@ -761,6 +831,12 @@ Task<> Community::unsubscribe_from_post(
         "RETURNING id",
         std::stoi(current_user_id), std::stoi(id));
 
+    std::string post_topic = create_topic("post", id);
+    ServiceManager::get_instance()
+        .get_connection_manager()
+        .unsubscribe_user_from_topic(current_user_id, post_topic);
+    remove_user_subscription(current_user_id, post_topic);
+
     Json::Value ret;
     if (result.size() > 0) {
       ret["status"] = "success";
@@ -769,6 +845,61 @@ Task<> Community::unsubscribe_from_post(
       ret["status"] = "success";
       ret["message"] = "Not subscribed to post";
     }
+    auto resp = HttpResponse::newHttpJsonResponse(ret);
+    callback(resp);
+  } catch (const DrogonDbException& e) {
+    LOG_ERROR << "Database error: " << e.base().what();
+    Json::Value error;
+    error["error"] = "Database error";
+    auto resp = HttpResponse::newHttpJsonResponse(error);
+    resp->setStatusCode(k500InternalServerError);
+    callback(resp);
+  }
+
+  co_return;
+}
+
+Task<> Community::subscribe_to_entity(
+    HttpRequestPtr req, std::function<void(const HttpResponsePtr&)> callback,
+    std::string name) {
+  std::string current_user_id =
+      req->getAttributes()->get<std::string>("current_user_id");
+  try {
+    ServiceManager::get_instance().get_subscriber().subscribe(name);
+    ServiceManager::get_instance().get_connection_manager().subscribe(
+        name, current_user_id);
+    store_user_subscription(current_user_id, name);
+
+    Json::Value ret;
+    ret["status"] = "success";
+    ret["message"] = "Subscription successful";
+    auto resp = HttpResponse::newHttpJsonResponse(ret);
+    callback(resp);
+  } catch (const DrogonDbException& e) {
+    LOG_ERROR << "Database error: " << e.base().what();
+    Json::Value error;
+    error["error"] = "Database error";
+    auto resp = HttpResponse::newHttpJsonResponse(error);
+    resp->setStatusCode(k500InternalServerError);
+    callback(resp);
+  }
+
+  co_return;
+}
+Task<> Community::unsubscribe_from_entity(
+    HttpRequestPtr req, std::function<void(const HttpResponsePtr&)> callback,
+    std::string name) {
+  std::string current_user_id =
+      req->getAttributes()->get<std::string>("current_user_id");
+  try {
+    ServiceManager::get_instance()
+        .get_connection_manager()
+        .unsubscribe_user_from_topic(current_user_id, name);
+    remove_user_subscription(current_user_id, name);
+
+    Json::Value ret;
+    ret["status"] = "success";
+    ret["message"] = "Unsubscribed from entity";
     auto resp = HttpResponse::newHttpJsonResponse(ret);
     callback(resp);
   } catch (const DrogonDbException& e) {

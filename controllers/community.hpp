@@ -30,6 +30,13 @@ class Community : public drogon::HttpController<Community> {
                 "/api/v1/posts/{id}/unsubscribe", Post, Options,
                 "CorsMiddleware", "AuthMiddleware");
 
+  ADD_METHOD_TO(Community::subscribe_to_entity,
+                "/api/v1/entity/{name}/subscribe", Post, Options,
+                "CorsMiddleware", "AuthMiddleware");
+  ADD_METHOD_TO(Community::unsubscribe_from_entity,
+                "/api/v1/entity/{name}/unsubscribe", Post, Options,
+                "CorsMiddleware", "AuthMiddleware");
+
   // Puts
   ADD_METHOD_TO(Community::update_post, "/api/v1/posts/{id}", Put, Options,
                 "CorsMiddleware", "AuthMiddleware");
@@ -55,6 +62,13 @@ class Community : public drogon::HttpController<Community> {
   Task<> unsubscribe_from_post(
       HttpRequestPtr req, std::function<void(const HttpResponsePtr&)> callback,
       std::string id);
+
+  Task<> subscribe_to_entity(
+      HttpRequestPtr req, std::function<void(const HttpResponsePtr&)> callback,
+      std::string name);
+  Task<> unsubscribe_from_entity(
+      HttpRequestPtr req, std::function<void(const HttpResponsePtr&)> callback,
+      std::string name);
 
   Task<> update_post(HttpRequestPtr req,
                      std::function<void(const HttpResponsePtr&)> callback,
