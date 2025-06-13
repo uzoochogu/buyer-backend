@@ -315,7 +315,8 @@ Task<> Offers::negotiate_offer(
       Json::Value offer_data_json;
       offer_data_json["type"] = "offer_negotiated";
       offer_data_json["id"] = id;
-      offer_data_json["message"] = "New Negotiation for your offer";
+      offer_data_json["message"] =
+          "New Negotiation: " + std::to_string(proposed_price);
       offer_data_json["modified_at"] =
           neg_result[0]["created_at"].as<std::string>();
 

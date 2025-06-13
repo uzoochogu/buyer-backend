@@ -79,7 +79,17 @@ class WebSocketAuthMiddleware : public HttpMiddleware<WebSocketAuthMiddleware> {
 
       // Token is valid, proceed to the next middleware/controller
       nextCb(std::move(mcb));
-    } catch (const std::exception &e) {
+    } /* catch (const jwt::error::token_verification_exception& e) {
+      if(e.code() == jwt::error::token_verification_error::token_expired) {
+      auto resp = HttpResponse::newHttpJsonResponse(
+          {{"error", "token expired"}});
+      resp->setStatusCode(k401Unauthorized);
+      mcb(resp);
+      } else {
+        throw e;
+      }
+    }  */
+    catch (const std::exception &e) {
       LOG_ERROR << "Websocket auth error: " << e.what();
       auto resp = HttpResponse::newHttpJsonResponse(
           {{"error", "Unauthorized: Invalid token"}});

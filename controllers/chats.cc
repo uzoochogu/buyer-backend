@@ -337,7 +337,7 @@ Task<> Chats::send_message(HttpRequestPtr req,
       Json::Value chat_data_json;
       chat_data_json["type"] = "message_sent";
       chat_data_json["id"] = conversation_id;
-      chat_data_json["message"] = "New message";
+      chat_data_json["message"] = content;
       chat_data_json["modified_at"] =
           insert_result[0]["created_at"].as<std::string>();
 

@@ -187,7 +187,8 @@ Task<> Offers::create_offer(
         Json::Value offer_data_json;
         offer_data_json["type"] = "offer_created";
         offer_data_json["id"] = offer_id;
-        offer_data_json["message"] = "New Offer Request for your Post ";
+        offer_data_json["message"] =
+            "New Offer: " + std::to_string(price) + ", " + title;
         offer_data_json["modified_at"] =
             insert_result[0]["created_at"].as<std::string>();
 
@@ -537,7 +538,8 @@ Task<> Offers::accept_offer(
           "ORDER BY created_at DESC LIMIT 1",
           std::stoi(id));
 
-      drogon::orm::Result rejected_offers_result;
+      drogon::orm::Result
+          rejected_offers_result;  // nullptr, always inited in both branches
 
       // If there are pending negotiations, accept the latest one and reject
       // others
@@ -552,8 +554,13 @@ Task<> Offers::accept_offer(
             "WHERE id = $1",
             latest_negotiation_id);
 
+        LOG_INFO << "Before Point 1" << "\n";
+        std::cout << std::endl;
         // Update message metadata for the accepted negotiation
         update_message_metadata(trans, negotiation_id_str, "accepted", true);
+
+        LOG_INFO << "POINT 1" << "\n";
+        std::cout << std::endl;
 
         // Reject all other negotiations for this offer
         auto other_negotiations_result = co_await trans->execSqlCoro(
@@ -566,6 +573,9 @@ Task<> Offers::accept_offer(
         LOG_INFO << "other_negotiations_result: "
                  << other_negotiations_result.size() << "\n";
 
+        LOG_INFO << "POINT 2" << "\n";
+        std::cout << std::endl;
+
         // Update message metadata for rejected negotiations
         for (const auto& row : other_negotiations_result) {
           std::string rejected_negotiation_id = row["id"].as<std::string>();
@@ -573,6 +583,8 @@ Task<> Offers::accept_offer(
                                   true);
         }
 
+        LOG_INFO << "POINT 3" << "\n";
+        std::cout << std::endl;
         // Continue with rejecting other offers
         rejected_offers_result = co_await trans->execSqlCoro(
             "UPDATE offers SET status = 'rejected', negotiation_status = "
@@ -580,12 +592,17 @@ Task<> Offers::accept_offer(
             "AND status = 'pending' RETURNING id, updated_at",
             post_id, std::stoi(id));
 
+        LOG_INFO << "POINT 4" << "\n";
+        std::cout << std::endl;
+
         // Update message metadata for all rejected offers
         for (const auto& row : rejected_offers_result) {
           std::string rejected_offer_id = row["id"].as<std::string>();
           update_message_metadata(trans, rejected_offer_id, "rejected");
         }
 
+        LOG_INFO << "POINT 5" << "\n";
+        std::cout << std::endl;
         // Reject all pending price negotiations for other offers
         auto rejected_negotiations_result = co_await trans->execSqlCoro(
             "UPDATE price_negotiations pn "
@@ -602,6 +619,8 @@ Task<> Offers::accept_offer(
           update_message_metadata(trans, rejected_negotiation_id, "rejected",
                                   true);
         }
+        LOG_INFO << "POINT 6" << "\n";
+        std::cout << std::endl;
 
         // Update post status to reflect that an offer was accepted
         co_await trans->execSqlCoro(
@@ -609,10 +628,10 @@ Task<> Offers::accept_offer(
             post_id);
       } else {
         // No pending negotiations, just reject other offers
-        auto rejected_offers_result = co_await trans->execSqlCoro(
+        rejected_offers_result = co_await trans->execSqlCoro(
             "UPDATE offers SET status = 'rejected', updated_at = NOW() "
             "WHERE post_id = $1 AND id != $2 AND status = 'pending' "
-            "RETURNING id",
+            "RETURNING id, updated_at",
             post_id, std::stoi(id));
 
         // Update message metadata for all rejected offers
