@@ -7,9 +7,13 @@
 
 #include "connection_manager.hpp"
 
-
 class SubManager {
  public:
+  SubManager() = delete;
+  // Move only
+  SubManager(const SubManager &) = delete;
+  SubManager &operator=(const SubManager &) = delete;
+
   SubManager(zmq::context_t &context, ConnectionManager &manager)
       : socket_(context, zmq::socket_type::sub), conn_mgr_(manager) {
     socket_.connect("inproc://pubsub");
