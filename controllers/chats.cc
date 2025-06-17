@@ -13,9 +13,6 @@
 #include <drogon/orm/SqlBinder.h>
 
 #include "../services/service_manager.hpp"
-#include "../services/subber/connection_manager.hpp"
-#include "../services/subber/pub_manager.hpp"
-#include "../services/subber/sub_manager.hpp"
 #include "../utilities/conversion.hpp"
 
 using namespace drogon;

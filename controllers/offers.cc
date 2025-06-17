@@ -16,9 +16,6 @@
 #include <vector>
 
 #include "../services/service_manager.hpp"
-#include "../services/subber/connection_manager.hpp"
-#include "../services/subber/pub_manager.hpp"
-#include "../services/subber/sub_manager.hpp"
 
 using namespace drogon;
 using namespace drogon::orm;
