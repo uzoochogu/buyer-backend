@@ -20,6 +20,7 @@ add_executable(${PROJECT_NAME} main.cc)
 # target_link_libraries(${PROJECT_NAME} PRIVATE drogon)
 #
 # and comment out the following line
+# find_package(redis++ CONFIG REQUIRED)
 find_package(boost_uuid REQUIRED CONFIG)
 find_package(cppzmq CONFIG REQUIRED)
 find_package(Drogon CONFIG REQUIRED)
@@ -30,12 +31,13 @@ target_link_libraries(${PROJECT_NAME} PRIVATE Drogon::Drogon
                                               jwt-cpp::jwt-cpp 
                                               unofficial::argon2::libargon2
                                               cppzmq cppzmq-static
+#                                              redis++::redis++
                                               Boost::uuid                
                       )
 
 # ##############################################################################
 
-
+# aux_source_directory("services/subber" SERVICE_SRC)
 aux_source_directory(controllers CTL_SRC)
 aux_source_directory(filters FILTER_SRC)
 aux_source_directory(plugins PLUGIN_SRC)
@@ -63,6 +65,7 @@ target_sources(${PROJECT_NAME}
                ${PLUGIN_SRC}
                ${MODEL_SRC}
                ${CONFIG_SRC})
+#               ${SERVICE_SRC})
 # ##############################################################################
 # uncomment the following line for dynamically loading views 
 # set_property(TARGET ${PROJECT_NAME} PROPERTY ENABLE_EXPORTS ON)

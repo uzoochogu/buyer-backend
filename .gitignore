@@ -564,7 +564,7 @@ FodyWeavers.xsd
 
 # Project specific ignores
 
-build/
+build*/
 models/
 
 # Configurations

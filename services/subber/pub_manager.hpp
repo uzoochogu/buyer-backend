@@ -4,9 +4,13 @@
 #include <string>
 #include <zmq.hpp>
 
-
 class PubManager {
  public:
+  PubManager() = delete;
+  // Move only
+  PubManager(const PubManager &) = delete;
+  PubManager &operator=(const PubManager &) = delete;
+
   PubManager(zmq::context_t &context)
       : socket_(context, zmq::socket_type::pub) {
     socket_.bind("inproc://pubsub");

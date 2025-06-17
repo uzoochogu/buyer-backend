@@ -9,28 +9,24 @@
 #include <unordered_map>
 #include <unordered_set>
 
-// enum class notification_type : uint8_t {
-//   NewPost,
-//   NewOffer,
-//   OfferUpdate,
-//   NewMessage,
-//   AcceptedOffer,
-//   // AcceptedCounteroffer
-//   RejectedOffer,
-// };
+// enum class notification_type : uint8_t {}
 
-// std::array<std::string, 6> notification_types = {
-//     "new_post",       "new_offer",      "offer_update", "new_message",
-//     "accepted_offer", "rejected_offer",};
+// notification types
+// post_created
+// post_updated
+
+// offer_created
+// offer_updated
+// offer_negotiated
+// offer_accepted
+// offer_rejected
+
+// chat_created
+// message_sent
 
 inline std::string create_topic(const std::string &topic_type,
                                 const std::string &topic_id) {
   return topic_type + ":" + topic_id;
-}
-
-inline std::string create_notification_message_prefix(
-    const std::string &topic) {
-  return topic + ",";
 }
 
 // inline drogon::Task<> remove_user_subscription(std::string user_id, const
@@ -170,18 +166,28 @@ class ConnectionManager {
     }
   }
   void subscribe(const std::string &topic, const std::string conn_id) {
-    std::lock_guard<std::mutex> lock(mutex_);
-    subscribers_[topic].insert(conn_id);
-
-    // search before insertion to prevent crashes.
-    // For debugging - can be removed in prod
-    LOG_INFO << "Content of topic " << topic << " , Connection ID: " << conn_id
-             << "\n";
-    auto it = connections_.find(conn_id);
-    if (it != connections_.end()) {
-      // send to only the main (newest) connection
-      it->second.front()->send("Subscribed to topic: " + topic);
+    try {
+      std::lock_guard<std::mutex> lock(mutex_);
+      subscribers_[topic].insert(conn_id);
+    } catch (const std::system_error &e) {
+      LOG_ERROR << "Lock acquisition failed, topic subscription failed: "
+                << e.what();
+    } catch (const std::bad_alloc &e) {
+      LOG_ERROR << "Out of Memory, no further subscriptions: " << e.what();
+    } catch (const std::exception &e) {
+      LOG_ERROR << "Topic Subscription failed: " << e.what();
     }
+
+    // // search before insertion to prevent crashes.
+    // // For debugging - can be removed in prod
+    // LOG_INFO << "Content of topic " << topic << " , Connection ID: " <<
+    // conn_id
+    //          << "\n";
+    // auto it = connections_.find(conn_id);
+    // if (it != connections_.end()) {
+    //   // send to only the main (newest) connection
+    //   it->second.front()->send("Subscribed to topic: " + topic);
+    // }
   }
   void unsubscribe(const std::string &conn_id) {
     std::lock_guard<std::mutex> lock(mutex_);

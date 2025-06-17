@@ -8,6 +8,9 @@
 #include "./subber/pub_manager.hpp"
 #include "./subber/sub_manager.hpp"
 
+// Redis PubSub option: noticed instability with large number of subscriptions
+// #include "./subber/redis_pub_manager.hpp"
+// #include "./subber/redis_sub_manager.hpp"
 
 class ServiceManager {
  public:
@@ -29,6 +32,14 @@ class ServiceManager {
     conn_mgr_ = std::make_unique<ConnectionManager>();
     publisher_ = std::make_unique<PubManager>(*context_);
     subscriber_ = std::make_unique<SubManager>(*context_, *conn_mgr_);
+
+    // // Redis PubSub option:
+    // conn_mgr_ = std::make_unique<ConnectionManager>();
+    // publisher_ = std::make_unique<PubManager>("tcp://127.0.0.1:6379");
+    // // publisher_ = std::make_unique<PubManager>("tcp://127.0.0.1:6400"); //
+    // // valkey option
+    // subscriber_ = std::make_unique<SubManager>(
+    //     publisher_->get_redis_subscriber(), *conn_mgr_);
 
     // Start subscriber
     subscriber_->run();
