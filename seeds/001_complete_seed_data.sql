@@ -308,6 +308,13 @@ VALUES  (1, 'electronics'),
         (1, 'chat:1'),
         (2, 'chat:1');
 
+-- locations
+INSERT INTO 
+    locations (user_id, latitude, longitude, accuracy, device_id, cluster_id, geom)
+VALUES
+    (1, 6.494326, 3.386144, 100, '1_device', 'cluster_1', ST_SetSRID(ST_MakePoint(3.386144, 6.494326), 4326)),
+    (2, 6.494295, 3.386047, 150, '2_device', 'cluster_1', ST_SetSRID(ST_MakePoint(3.386047, 6.494295), 4326));
+
 -- Add sample product proofs
 INSERT INTO
     product_proofs (offer_id, user_id, image_url, description, status)

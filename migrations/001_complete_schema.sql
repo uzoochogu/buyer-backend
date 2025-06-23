@@ -167,6 +167,22 @@ CREATE TABLE notifications (
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
+CREATE EXTENSION postgis;
+
+CREATE TABLE locations (
+    id SERIAL PRIMARY KEY,
+    user_id INTEGER REFERENCES users (id),
+    latitude DOUBLE PRECISION NOT NULL,
+    longitude DOUBLE PRECISION NOT NULL,
+    accuracy FLOAT,
+    device_id VARCHAR(255) NOT NULL,
+    cluster_id VARCHAR(64),
+    created_at TIMESTAMP DEFAULT NOW(),
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    geom GEOGRAPHY (POINT, 4326),
+    UNIQUE (user_id)
+);
+
 -- Indexes from 002_enhance_posts.sql
 CREATE INDEX posts_tags_idx ON posts USING GIN (tags);
 
@@ -196,3 +212,11 @@ CREATE INDEX notifications_user_id_idx ON notifications (user_id);
 CREATE INDEX notifications_is_read_idx ON notifications (is_read);
 
 CREATE INDEX notifications_created_at_idx ON notifications (created_at);
+
+-- Create spatial index for fast queries
+CREATE INDEX locations_geom_idx ON locations USING GIST (geom);
+
+-- Create regular indexes for other queries
+CREATE INDEX locations_cluster_idx ON locations (cluster_id);
+
+CREATE INDEX locations_device_idx ON locations (device_id);
