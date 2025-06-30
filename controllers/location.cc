@@ -17,6 +17,7 @@
 
 #define MLPACK_PRINT_INFO
 #define MLPACK_PRINT_WARN
+#include <format>
 #include <mlpack.hpp>
 #include <mlpack/methods/dbscan/dbscan.hpp>
 
@@ -79,7 +80,7 @@ Task<> LocationController::add_location(
   } catch (const std::exception& e) {
     Json::Value error;
     LOG_ERROR << "Failed to create error: " << e.what();
-    error["error"] = "Failed to save location";
+    error["error"] = std::format("Failed to save location:  {}", e.what());
     auto resp = HttpResponse::newHttpJsonResponse(error);
     resp->setStatusCode(k500InternalServerError);
     callback(resp);
@@ -114,9 +115,10 @@ Task<> LocationController::get_clusters(
     auto resp = HttpResponse::newHttpJsonResponse(clusters);
     callback(resp);
   } catch (const std::exception& e) {
-    auto resp = HttpResponse::newHttpResponse();
-    resp->setStatusCode(k500InternalServerError);
-    resp->setBody(e.what());
+    Json::Value error;
+    error["error"] = e.what();
+    auto resp = drogon::HttpResponse::newHttpJsonResponse(error);
+    resp->setStatusCode(drogon::k500InternalServerError);
     callback(resp);
   }
   co_return;
@@ -133,7 +135,12 @@ Task<> LocationController::find_nearby(
     if (radius.empty()) radius = "1000";  // Default 1km radius
 
     if (lat.empty() || lon.empty()) {
-      throw std::runtime_error("Missing lat/lon parameters");
+      Json::Value error;
+      error["error"] = "Missing lat/lon parameters";
+      auto resp = HttpResponse::newHttpJsonResponse(error);
+      resp->setStatusCode(k400BadRequest);
+      callback(resp);
+      co_return;
     }
 
     auto client = app().getDbClient();
@@ -163,9 +170,10 @@ Task<> LocationController::find_nearby(
     auto resp = HttpResponse::newHttpJsonResponse(nearby_points);
     callback(resp);
   } catch (const std::exception& e) {
-    auto resp = HttpResponse::newHttpResponse();
-    resp->setStatusCode(k500InternalServerError);
-    resp->setBody(e.what());
+    Json::Value error;
+    error["error"] = e.what();
+    auto resp = drogon::HttpResponse::newHttpJsonResponse(error);
+    resp->setStatusCode(drogon::k500InternalServerError);
     callback(resp);
   }
   co_return;
