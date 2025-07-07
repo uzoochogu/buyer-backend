@@ -4,6 +4,7 @@
 #include <drogon/WebSocketConnection.h>
 #include <drogon/drogon.h>
 
+#include <format>
 #include <mutex>
 #include <string>
 #include <unordered_map>
@@ -26,7 +27,7 @@
 
 inline std::string create_topic(const std::string &topic_type,
                                 const std::string &topic_id) {
-  return topic_type + ":" + topic_id;
+  return std::format("{}:{}", topic_type, topic_id);
 }
 
 // inline drogon::Task<> remove_user_subscription(std::string user_id, const
