@@ -12,8 +12,11 @@
 #include <drogon/orm/Row.h>
 #include <drogon/orm/SqlBinder.h>
 
+#include <format>
+
 #include "../services/service_manager.hpp"
 #include "../utilities/conversion.hpp"
+#include "scenario_specific_utils.hpp"
 
 using namespace drogon;
 using namespace drogon::orm;
@@ -225,8 +228,7 @@ Task<> Chats::get_messages(HttpRequestPtr req,
         "user_id = $2",
         std::stoi(conversation_id), std::stoi(user_id));
 
-    if (result.size() == 0) {
-      // User is not a participant
+    if (result.size() < 1) {
       Json::Value error;
       error["error"] = "Unauthorized access to conversation";
       auto resp = HttpResponse::newHttpJsonResponse(error);
@@ -238,23 +240,30 @@ Task<> Chats::get_messages(HttpRequestPtr req,
     // Get messages for the conversation
     auto messages_result = co_await db->execSqlCoro(
         "SELECT m.id, m.sender_id, u.username as sender_name, m.content, "
-        "m.is_read, m.created_at, m.metadata "
+        "m.message_type, m.is_read, m.created_at, m.metadata "
         "FROM messages m "
         "JOIN users u ON m.sender_id = u.id "
         "WHERE m.conversation_id = $1 "
         "ORDER BY m.created_at ASC",
         std::stoi(conversation_id));
 
-    Json::Value messages;
+    Json::Value messages(Json::arrayValue);
     for (const auto& row : messages_result) {
       Json::Value message;
-      message["id"] = row["id"].as<int>();
+      int message_id = row["id"].as<int>();
+      message["id"] = message_id;
       message["sender_id"] = row["sender_id"].as<int>();
       message["sender_name"] = row["sender_name"].as<std::string>();
       message["content"] = row["content"].as<std::string>();
+      message["message_type"] = row["message_type"].as<std::string>();
       message["is_read"] = row["is_read"].as<bool>();
       message["created_at"] = row["created_at"].as<std::string>();
       message["metadata"] = row["metadata"].as<std::string>();
+
+      message["media"] =
+          row["message_type"].as<std::string>() == "text"
+              ? Json::Value(Json::nullValue)
+              : co_await get_media_attachments("message", message_id);
       messages.append(message);
     }
 
@@ -289,27 +298,59 @@ Task<> Chats::send_message(HttpRequestPtr req,
     callback(resp);
     co_return;
   }
-  // Validation: Missing message content
-  if (!json || !(*json).isMember("content") ||
-      (*json)["content"].asString().empty()) {
+
+  /**
+   * content and media can't be both missing.
+   * if content is provided (and media isn't), it can't be empty.
+   * if media is provided it should be either null or an array.
+   */
+  if (!json || (!(*json).isMember("content") && !(*json).isMember("media")) ||
+      ((*json).isMember("content") && !(*json).isMember("media") &&
+       (*json)["content"].asString().empty()) ||
+      ((*json).isMember("media") &&
+       !((*json)["media"].isNull() || (*json)["media"].isArray()))) {
+    LOG_INFO << "Message content or media is required, content a string, media "
+                "an array of strings";
     Json::Value error;
-    error["error"] = "Message content is required";
+    error["error"] =
+        "Message content or media is required, content a string, media an "
+        "array of strings";
     auto resp = HttpResponse::newHttpJsonResponse(error);
     resp->setStatusCode(k400BadRequest);
     callback(resp);
     co_return;
   }
-  std::string content = (*json)["content"].asString();
+
+  std::string content =
+      (*json).isMember("content") ? (*json)["content"].asString() : "";
+  Json::Value media_array = (*json).isMember("media")
+                                ? (*json)["media"]
+                                : Json::Value(Json::arrayValue);
+
+  if (media_array.size() > MAX_MEDIA_SIZE) {
+    Json::Value error;
+    error["error"] = "Maximum of 5 media items allowed per message";
+    auto resp = HttpResponse::newHttpJsonResponse(error);
+    resp->setStatusCode(k400BadRequest);
+    callback(resp);
+    co_return;
+  }
+
+  std::string message_type = "text";
+  if (media_array.size() > 0) {
+    message_type = content.empty() ? "media" : "mixed";
+  }
 
   auto db = app().getDbClient();
 
   try {
+    int current_user_id = std::stoi(user_id);
     // First verify the user is a participant in this conversation
     auto result = co_await db->execSqlCoro(
         "SELECT 1 FROM conversation_participants WHERE conversation_id = $1 "
         "AND "
         "user_id = $2",
-        std::stoi(conversation_id), std::stoi(user_id));
+        std::stoi(conversation_id), current_user_id);
 
     if (result.size() == 0) {
       // User is not a participant
@@ -321,22 +362,59 @@ Task<> Chats::send_message(HttpRequestPtr req,
       co_return;
     }
 
-    // Insert the message
-    auto insert_result = co_await db->execSqlCoro(
-        "INSERT INTO messages (conversation_id, sender_id, content) "
-        "VALUES ($1, $2, $3) RETURNING id, created_at",
-        std::stoi(conversation_id), std::stoi(user_id), content);
+    auto transaction = co_await db->newTransactionCoro();
+    try {
+      auto insert_result = co_await transaction->execSqlCoro(
+          "INSERT INTO messages (conversation_id, sender_id, content, "
+          "message_type) "
+          "VALUES ($1, $2, $3, $4) RETURNING id, created_at",
+          std::stoi(conversation_id), current_user_id, content, message_type);
 
-    if (insert_result.size() > 0) {
+      if (insert_result.size() < 1) {
+        throw std::runtime_error("Initial message insert failed");
+      }
+
+      int message_id = insert_result[0]["id"].as<int>();
+      std::string created_at = insert_result[0]["created_at"].as<std::string>();
+
+      std::size_t media_array_size = media_array.size();
+      Json::Value processed_media = co_await process_media_attachments(
+          std::move(media_array), transaction, current_user_id, "message",
+          message_id);
+      if (processed_media == Json::nullValue ||
+          processed_media.size() < media_array_size) {
+        LOG_ERROR << " Some Media info was not found";
+        transaction->rollback();
+        std::string error_string;
+        for (const auto& media_item : processed_media) {
+          error_string += media_item["file_name"].asString() + ", ";
+        }
+        Json::Value error;
+        error["error"] = std::format(
+            "Media info not found or processed, only the following media items "
+            "were processed:\n{}",
+            error_string);
+        auto resp = HttpResponse::newHttpJsonResponse(error);
+        resp->setStatusCode(k400BadRequest);
+        callback(resp);
+        co_return;
+      }
+      // end transaction
+
       // notification
       std::string chat_topic = create_topic("chat", conversation_id);
 
       Json::Value chat_data_json;
       chat_data_json["type"] = "message_sent";
       chat_data_json["id"] = conversation_id;
-      chat_data_json["message"] = content;
-      chat_data_json["modified_at"] =
-          insert_result[0]["created_at"].as<std::string>();
+      chat_data_json["message"] = message_type != "text"
+                                      ? std::format("Media shared: {}", content)
+                                      : content;
+      chat_data_json["modified_at"] = created_at;
+
+      if (processed_media.size() > 0) {
+        chat_data_json["media"] = processed_media;
+      }
 
       Json::FastWriter writer;
       std::string chat_data = writer.write(chat_data_json);
@@ -345,16 +423,25 @@ Task<> Chats::send_message(HttpRequestPtr req,
                                                              chat_data);
       Json::Value ret;
       ret["status"] = "success";
-      ret["message_id"] = insert_result[0]["id"].as<int>();
-      ret["created_at"] = insert_result[0]["created_at"].as<std::string>();
+      ret["message_id"] = message_id;
+      ret["created_at"] = created_at;
+      ret["message_type"] = message_type;
+      if (processed_media.size() > 0) {
+        ret["media"] = processed_media;
+      }
       auto resp = HttpResponse::newHttpJsonResponse(ret);
       callback(resp);
-    } else {
+
+      co_return;
+    } catch (const std::exception& e) {
+      LOG_ERROR << "Failed to send message: " << e.what();
+      transaction->rollback();
       Json::Value error;
-      error["error"] = "Failed to send message";
+      error["error"] = std::format("Failed to send message: {}", e.what());
       auto resp = HttpResponse::newHttpJsonResponse(error);
       resp->setStatusCode(k500InternalServerError);
       callback(resp);
+      co_return;
     }
   } catch (const DrogonDbException& e) {
     LOG_ERROR << "Database error: " << e.base().what();
