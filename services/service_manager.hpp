@@ -4,6 +4,7 @@
 #include <memory>
 #include <zmq.hpp>
 
+#include "./media_server/s3_service.hpp"
 #include "./subber/connection_manager.hpp"
 #include "./subber/pub_manager.hpp"
 #include "./subber/sub_manager.hpp"
@@ -11,6 +12,8 @@
 // Redis PubSub option: noticed instability with large number of subscriptions
 // #include "./subber/redis_pub_manager.hpp"
 // #include "./subber/redis_sub_manager.hpp"
+
+inline static constexpr const std::uint32_t MAX_MEDIA_SIZE = 5U;
 
 class ServiceManager {
  public:
@@ -26,12 +29,18 @@ class ServiceManager {
   PubManager& get_publisher() { return *publisher_; }
   SubManager& get_subscriber() { return *subscriber_; }
   ConnectionManager& get_connection_manager() { return *conn_mgr_; }
+  S3Service& get_s3_service() { return *s3_service_; }
 
   void initialize() {
     context_ = std::make_unique<zmq::context_t>(1);
     conn_mgr_ = std::make_unique<ConnectionManager>();
     publisher_ = std::make_unique<PubManager>(*context_);
     subscriber_ = std::make_unique<SubManager>(*context_, *conn_mgr_);
+
+    // AWS SDK
+    Aws::SDKOptions options;
+    Aws::InitAPI(options);
+    s3_service_ = std::make_unique<S3Service>();
 
     // // Redis PubSub option:
     // conn_mgr_ = std::make_unique<ConnectionManager>();
@@ -49,6 +58,9 @@ class ServiceManager {
     if (subscriber_) {
       subscriber_->stop();  // Graceful shutdown
     }
+
+    Aws::SDKOptions options;
+    Aws::ShutdownAPI(options);
   }
 
  private:
@@ -58,6 +70,7 @@ class ServiceManager {
   std::unique_ptr<ConnectionManager> conn_mgr_;
   std::unique_ptr<PubManager> publisher_;
   std::unique_ptr<SubManager> subscriber_;
+  std::unique_ptr<S3Service> s3_service_;
 };
 
 #endif  // SERVICE_MANAGER_HPP

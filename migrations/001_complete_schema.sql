@@ -26,6 +26,17 @@ CREATE TABLE orders (
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
+CREATE TABLE media (
+    id SERIAL PRIMARY KEY,
+    uploader_id INT REFERENCES users (id) ON DELETE SET NULL,
+    storage_key VARCHAR(300) NOT NULL UNIQUE, -- uploads/uuid_filename.extension
+    file_name VARCHAR(255),
+    mime_type VARCHAR(127),
+    size BIGINT,
+    metadata JSONB DEFAULT '{}'::jsonb,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
 CREATE TABLE posts (
     id SERIAL PRIMARY KEY,
     user_id INT REFERENCES users (id),
@@ -37,6 +48,12 @@ CREATE TABLE posts (
     is_product_request BOOLEAN DEFAULT FALSE,
     request_status VARCHAR(50) DEFAULT 'open',
     price_range VARCHAR(100)
+);
+
+CREATE TABLE post_media (
+    post_id INT REFERENCES posts(id) ON DELETE CASCADE,
+    media_id INT REFERENCES media(id) ON DELETE CASCADE,
+    PRIMARY KEY (post_id, media_id)
 );
 
 CREATE TABLE conversations (
@@ -56,12 +73,18 @@ CREATE TABLE messages (
     conversation_id INT REFERENCES conversations (id) ON DELETE CASCADE,
     sender_id INT REFERENCES users (id) ON DELETE CASCADE,
     content TEXT NOT NULL,
+    message_type VARCHAR(20) DEFAULT 'text', -- 'text', 'media', 'mixed'    
     is_read BOOLEAN DEFAULT FALSE,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    -- Fields from 004_negotiation_and_product_proof.sql
     context_type VARCHAR(50),
     context_id INT,
     metadata JSONB DEFAULT '{}'::jsonb
+);
+
+CREATE TABLE message_media (
+    message_id INT REFERENCES messages(id) ON DELETE CASCADE,
+    media_id INT REFERENCES media(id) ON DELETE CASCADE,
+    PRIMARY KEY (message_id, media_id)
 );
 
 -- Table from 002_enhance_posts.sql
@@ -88,6 +111,12 @@ CREATE TABLE offers (
     -- Fields from 004_negotiation_and_product_proof.sql
     negotiation_status VARCHAR(50) DEFAULT 'none',
     original_price DECIMAL(10, 2) NOT NULL
+);
+
+CREATE TABLE offer_media (
+    offer_id INT REFERENCES offers(id) ON DELETE CASCADE,
+    media_id INT REFERENCES media(id) ON DELETE CASCADE,
+    PRIMARY KEY (offer_id, media_id)
 );
 
 CREATE TABLE offer_notifications (
@@ -203,6 +232,22 @@ CREATE INDEX price_negotiations_offer_id_idx ON price_negotiations (offer_id);
 CREATE INDEX escrow_transactions_offer_id_idx ON escrow_transactions (offer_id);
 
 CREATE INDEX messages_context_idx ON messages (context_type, context_id);
+
+-- Fast retrieval of messages in a conversation, newest first
+CREATE INDEX messages_conversation_created_at_idx ON messages(conversation_id, created_at DESC);
+
+-- Fast lookup of unread messages in a conversation
+CREATE INDEX messages_unread_idx ON messages(conversation_id, is_read) WHERE is_read = false;
+
+-- Queries by message_type
+CREATE INDEX messages_type_idx ON messages(message_type);
+
+CREATE INDEX message_media_media_id_idx ON message_media(media_id);
+
+-- Fast lookup of media in posts and offers
+CREATE INDEX post_media_media_id_idx ON post_media(media_id);
+
+CREATE INDEX offer_media_media_id_idx ON offer_media(media_id);
 
 -- Indexes from notifications
 CREATE INDEX user_subscriptions_user_id_idx ON user_subscriptions (user_id);

@@ -28,6 +28,8 @@ find_package(jwt-cpp CONFIG REQUIRED)
 find_package(unofficial-argon2 CONFIG REQUIRED)
 find_path(MLPACK_INCLUDE_DIRS "mlpack.hpp")
 find_package(Armadillo CONFIG REQUIRED)
+find_package(aws-cpp-sdk-core REQUIRED)
+find_package(aws-cpp-sdk-s3 REQUIRED)
 
 target_link_libraries(${PROJECT_NAME} PRIVATE Drogon::Drogon 
                                               jwt-cpp::jwt-cpp 
@@ -35,12 +37,16 @@ target_link_libraries(${PROJECT_NAME} PRIVATE Drogon::Drogon
                                               cppzmq cppzmq-static
                                               armadillo
 #                                              redis++::redis++
-                                              Boost::uuid                
+                                              Boost::uuid
+                                              aws-cpp-sdk-core
+                                              aws-cpp-sdk-s3               
                       )
 
 # ##############################################################################
 
-# aux_source_directory("services/subber" SERVICE_SRC)
+file(GLOB_RECURSE SERVICE_SRC CONFIGURE_DEPENDS 
+     ${PROJECT_SOURCE_DIR}/services/*
+    )
 aux_source_directory(controllers CTL_SRC)
 aux_source_directory(filters FILTER_SRC)
 aux_source_directory(plugins PLUGIN_SRC)
@@ -59,7 +65,9 @@ drogon_create_views(${PROJECT_NAME} ${CMAKE_CURRENT_SOURCE_DIR}/views
 
 target_include_directories(${PROJECT_NAME}
                            PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}
-                                   ${CMAKE_CURRENT_SOURCE_DIR}/models)
+                                   # ${CMAKE_CURRENT_SOURCE_DIR}/models
+                                   aws-cpp-sdk-core 
+                                   )
 target_sources(${PROJECT_NAME}
                PRIVATE
                ${SRC_DIR}
@@ -67,8 +75,8 @@ target_sources(${PROJECT_NAME}
                ${FILTER_SRC}
                ${PLUGIN_SRC}
                ${MODEL_SRC}
-               ${CONFIG_SRC})
-#               ${SERVICE_SRC})
+               ${CONFIG_SRC}
+               ${SERVICE_SRC})
 # ##############################################################################
 # uncomment the following line for dynamically loading views 
 # set_property(TARGET ${PROJECT_NAME} PROPERTY ENABLE_EXPORTS ON)

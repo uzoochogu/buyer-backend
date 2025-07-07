@@ -21,6 +21,7 @@
 #include "../services/service_manager.hpp"
 #include "../utilities/conversion.hpp"
 #include "../utilities/time_manipulation.hpp"
+#include "scenario_specific_utils.hpp"
 
 using namespace drogon;
 using namespace drogon::orm;
@@ -111,7 +112,8 @@ Task<> Community::get_posts(
     Json::Value posts;
     for (const auto& row : result) {
       Json::Value post;
-      post["id"] = row["id"].as<int>();
+      int post_id = row["id"].as<int>();
+      post["id"] = post_id;
       post["user_id"] = row["user_id"].as<int>();
       post["username"] = row["username"].as<std::string>();
       post["content"] = row["content"].as<std::string>();
@@ -128,6 +130,7 @@ Task<> Community::get_posts(
       post["subscription_count"] = row["subscription_count"].as<int>();
       post["is_subscribed"] = row["is_subscribed"].as<bool>();
 
+      post["media"] = co_await get_media_attachments("post", post_id);
       posts.append(post);
     }
 
@@ -179,71 +182,115 @@ Task<> Community::create_post(
     tags_str = json_array_to_string((*json)["tags"]);
   }
 
+  Json::Value media_array = json->isMember("media")
+                                ? (*json)["media"]
+                                : Json::Value(Json::arrayValue);
+
+  if (media_array.size() > MAX_MEDIA_SIZE) {
+    Json::Value error;
+    error["error"] = "Maximum of 5 media items allowed per post";
+    auto resp = HttpResponse::newHttpJsonResponse(error);
+    resp->setStatusCode(k400BadRequest);
+    callback(resp);
+    co_return;
+  }
+
   auto db = app().getDbClient();
+  auto transaction = co_await db->newTransactionCoro();
 
   try {
-    auto result = co_await db->execSqlCoro(
+    auto result = co_await transaction->execSqlCoro(
         "INSERT INTO posts (user_id, content, tags, location, "
         "is_product_request, request_status, price_range) "
         "VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING id, created_at",
         std::stoi(user_id), content, tags_str, location, is_product_request,
         request_status, price_range);
 
-    if (result.size() > 0) {
-      // Notification
-
-      // Auto-subscribe post owner to their post
-      std::string post_id = result[0]["id"].as<std::string>();
-      std::string post_topic = create_topic("post", post_id);
-      ServiceManager::get_instance().get_subscriber().subscribe(post_topic);
-      ServiceManager::get_instance().get_connection_manager().subscribe(
-          post_topic, user_id);
-      store_user_subscription(user_id, post_topic);
-      LOG_INFO << "User " << user_id
-               << " subscribed to post topic: " << post_topic;
-
-      // create post data
-      Json::Value post_data_json;
-      post_data_json["type"] = "post_created";
-      post_data_json["id"] = post_id;
-      post_data_json["message"] =
-          is_product_request ? "New Product Request: " + content : content;
-      post_data_json["modified_at"] = result[0]["created_at"].as<std::string>();
-
-      Json::FastWriter writer;
-      std::string post_data = writer.write(post_data_json);
-
-      // Publish to tag subscribers
-      if (json->isMember("tags") && (*json)["tags"].isArray()) {
-        for (const auto& tag : (*json)["tags"]) {
-          std::string tag_topic = tag.asString();
-          ServiceManager::get_instance().get_publisher().publish(tag_topic,
-                                                                 post_data);
-          LOG_INFO << "Published new post to tag channel: " << tag_topic;
-        }
-      }
-
-      // Publish to location subscribers
-      if (!location.empty()) {
-        ServiceManager::get_instance().get_publisher().publish(location,
-                                                               post_data);
-        LOG_INFO << "Published new post to location channel: " << location;
-      }
-
-      Json::Value ret;
-      ret["status"] = "success";
-      ret["post_id"] = result[0]["id"].as<int>();  // post_id
-      ret["created_at"] = result[0]["created_at"].as<std::string>();
-      auto resp = HttpResponse::newHttpJsonResponse(ret);
-      callback(resp);
-    } else {
-      Json::Value error;
-      error["error"] = "Failed to create post";
-      auto resp = HttpResponse::newHttpJsonResponse(error);
-      resp->setStatusCode(k500InternalServerError);
-      callback(resp);
+    if (result.size() < 1) {
+      throw std::runtime_error("Initial post insert failed");
     }
+    int post_id = result[0]["id"].as<int>();
+    std::string created_at = result[0]["created_at"].as<std::string>();
+
+    // insert media attachments
+    std::size_t media_array_size = media_array.size();
+    Json::Value processed_media =
+        co_await process_media_attachments(std::move(media_array), transaction,
+                                           std::stoi(user_id), "post", post_id);
+    if (processed_media == Json::nullValue ||
+        processed_media.size() < media_array_size) {
+      LOG_ERROR << " Some Media info was not found";
+      transaction->rollback();
+      std::string error_string;
+      for (const auto& media_item : processed_media) {
+        error_string += media_item["file_name"].asString() + ", ";
+      }
+      Json::Value error;
+      error["error"] = std::format(
+          "Media info not found or processed, only the following media items "
+          "were processed:\n{}",
+          error_string);
+      auto resp = HttpResponse::newHttpJsonResponse(error);
+      resp->setStatusCode(k400BadRequest);
+      callback(resp);
+      co_return;
+    }
+
+    // Notification
+    // Auto-subscribe post owner to their post
+    std::string post_id_str = std::to_string(post_id);
+    std::string post_topic = create_topic("post", post_id_str);
+    ServiceManager::get_instance().get_subscriber().subscribe(post_topic);
+    ServiceManager::get_instance().get_connection_manager().subscribe(
+        post_topic, user_id);
+    store_user_subscription(user_id, post_topic);
+    LOG_INFO << "User " << user_id
+             << " subscribed to post topic: " << post_topic;
+
+    // create post data
+    Json::Value post_data_json;
+    post_data_json["type"] = "post_created";
+    post_data_json["id"] = post_id_str;
+    post_data_json["message"] =
+        is_product_request ? "New Product Request: " + content : content;
+    post_data_json["modified_at"] = result[0]["created_at"].as<std::string>();
+
+    Json::FastWriter writer;
+    std::string post_data = writer.write(post_data_json);
+
+    // Publish to tag subscribers
+    if (json->isMember("tags") && (*json)["tags"].isArray()) {
+      for (const auto& tag : (*json)["tags"]) {
+        std::string tag_topic = tag.asString();
+        ServiceManager::get_instance().get_publisher().publish(tag_topic,
+                                                               post_data);
+        LOG_INFO << "Published new post to tag channel: " << tag_topic;
+      }
+    }
+
+    // Publish to location subscribers
+    if (!location.empty()) {
+      ServiceManager::get_instance().get_publisher().publish(location,
+                                                             post_data);
+      LOG_INFO << "Published new post to location channel: " << location;
+    }
+
+    Json::Value ret;
+    ret["status"] = "success";
+    ret["post_id"] = post_id;
+    ret["created_at"] = created_at;
+    auto resp = HttpResponse::newHttpJsonResponse(ret);
+    callback(resp);
+  } catch (const std::exception& e) {
+    transaction->rollback();
+    LOG_ERROR << "Failed to create post" << e.what();
+    Json::Value error;
+    error["error"] = std::format("Failed to create post {}", e.what());
+    auto resp = HttpResponse::newHttpJsonResponse(error);
+    resp->setStatusCode(k500InternalServerError);
+    callback(resp);
   } catch (const DrogonDbException& e) {
+    transaction->rollback();
     LOG_ERROR << "Database error: " << e.base().what();
     Json::Value error;
     error["error"] = "Database error";
@@ -275,6 +322,7 @@ Task<> Community::get_post_by_id(
   }
 
   try {
+    int post_id = std::stoi(id);
     auto result = co_await db->execSqlCoro(
         "SELECT p.*, u.username, "
         "(SELECT COUNT(*) FROM post_subscriptions WHERE post_id = p.id) AS "
@@ -284,37 +332,39 @@ Task<> Community::get_post_by_id(
         "FROM posts p "
         "JOIN users u ON p.user_id = u.id "
         "WHERE p.id = $1",
-        std::stoi(id), current_user_id);
+        post_id, current_user_id);
 
-    if (result.size() > 0) {
-      const auto& row = result[0];
-      Json::Value post;
-      post["id"] = row["id"].as<int>();
-      post["user_id"] = row["user_id"].as<int>();
-      post["username"] = row["username"].as<std::string>();
-      post["content"] = row["content"].as<std::string>();
-      post["created_at"] = row["created_at"].as<std::string>();
-
-      post["tags"] = string_array_to_json(row["tags"].as<std::string>());
-      post["location"] =
-          row["location"].isNull() ? "" : row["location"].as<std::string>();
-      post["is_product_request"] = row["is_product_request"].as<bool>();
-      post["request_status"] = row["request_status"].as<std::string>();
-      post["price_range"] = row["price_range"].isNull()
-                                ? ""
-                                : row["price_range"].as<std::string>();
-      post["subscription_count"] = row["subscription_count"].as<int>();
-      post["is_subscribed"] = row["is_subscribed"].as<bool>();
-
-      auto resp = HttpResponse::newHttpJsonResponse(post);
-      callback(resp);
-    } else {
+    if (result.size() < 1) {
       Json::Value error;
       error["error"] = "Post not found";
       auto resp = HttpResponse::newHttpJsonResponse(error);
       resp->setStatusCode(k404NotFound);
       callback(resp);
     }
+
+    const auto& row = result[0];
+    Json::Value post;
+    post["id"] = post_id;
+    post["user_id"] = row["user_id"].as<int>();
+    post["username"] = row["username"].as<std::string>();
+    post["content"] = row["content"].as<std::string>();
+    post["created_at"] = row["created_at"].as<std::string>();
+
+    post["tags"] = string_array_to_json(row["tags"].as<std::string>());
+    post["location"] =
+        row["location"].isNull() ? "" : row["location"].as<std::string>();
+    post["is_product_request"] = row["is_product_request"].as<bool>();
+    post["request_status"] = row["request_status"].as<std::string>();
+    post["price_range"] =
+        row["price_range"].isNull() ? "" : row["price_range"].as<std::string>();
+    post["subscription_count"] = row["subscription_count"].as<int>();
+    post["is_subscribed"] = row["is_subscribed"].as<bool>();
+
+    post["media"] = co_await get_media_attachments("post", post_id);
+
+    auto resp = HttpResponse::newHttpJsonResponse(post);
+    callback(resp);
+
   } catch (const DrogonDbException& e) {
     LOG_ERROR << "Database error: " << e.base().what();
     Json::Value error;
@@ -478,6 +528,8 @@ Task<> Community::get_post_by_id(
 // }
 
 // Update a post
+// Current behaviour is to overwrite data with any newly provide data.
+// Media files are overwritten with new files.
 Task<> Community::update_post(
     HttpRequestPtr req, std::function<void(const HttpResponsePtr&)> callback,
     std::string id) {
@@ -485,14 +537,48 @@ Task<> Community::update_post(
   std::string current_user_id =
       req->getAttributes()->get<std::string>("current_user_id");
 
+  // Validation: Malformed route
+  if (!convert::string_to_int(id).has_value() ||
+      convert::string_to_int(id).value() < 0) {
+    Json::Value error;
+    error["error"] = "Invalid post id";
+    auto resp = HttpResponse::newHttpJsonResponse(error);
+    resp->setStatusCode(k400BadRequest);
+    callback(resp);
+    co_return;
+  }
+
+  // Validation: content type
+  if (!json || !(*json).isMember("content") || !(*json)["content"].isString()) {
+    Json::Value error;
+    error["error"] = "conent must be a string if provided";
+    auto resp = HttpResponse::newHttpJsonResponse(error);
+    resp->setStatusCode(k400BadRequest);
+    callback(resp);
+    co_return;
+  }
+
+  Json::Value media_array = json->isMember("media")
+                                ? (*json)["media"]
+                                : Json::Value(Json::arrayValue);
+
+  if (media_array.size() > MAX_MEDIA_SIZE) {
+    Json::Value error;
+    error["error"] = "Maximum of 5 media items allowed per post";
+    auto resp = HttpResponse::newHttpJsonResponse(error);
+    resp->setStatusCode(k400BadRequest);
+    callback(resp);
+    co_return;
+  }
+
   auto db = app().getDbClient();
 
   try {
     // First check if the user is the owner of the post
-    auto result = co_await db->execSqlCoro(
+    auto check_result = co_await db->execSqlCoro(
         "SELECT user_id FROM posts WHERE id = $1", std::stoi(id));
 
-    if (result.size() == 0) {
+    if (check_result.size() < 1) {
       Json::Value error;
       error["error"] = "Post not found";
       auto resp = HttpResponse::newHttpJsonResponse(error);
@@ -501,7 +587,7 @@ Task<> Community::update_post(
       co_return;
     }
 
-    int post_user_id = result[0]["user_id"].as<int>();
+    int post_user_id = check_result[0]["user_id"].as<int>();
     if (post_user_id != std::stoi(current_user_id)) {
       Json::Value error;
       error["error"] = "You don't have permission to update this post";
@@ -517,6 +603,7 @@ Task<> Community::update_post(
     bool has_location = json->isMember("location");
     bool has_price_range = json->isMember("price_range");
     bool has_tags = json->isMember("tags") && (*json)["tags"].isArray();
+    bool has_media = media_array.size() > 0;
 
     if (!has_content && !has_request_status && !has_location &&
         !has_price_range && !has_tags) {
@@ -530,22 +617,25 @@ Task<> Community::update_post(
 
     // Prepare values for the update
     std::string content = has_content ? (*json)["content"].asString() : "";
-    std::string request_status =
-        has_request_status ? (*json)["request_status"].asString() : "";
 
-    // Validation: correct statuses include: open, cancelled, fulfilled,
-    // in_progress,
-    if (request_status != "open" && request_status != "in_progress" &&
-        request_status != "cancelled" &&
-        (request_status != "" && has_request_status) &&
-        request_status != "fulfilled") {
-      Json::Value error;
-      error["error"] = "Invalid request status";
-      auto resp = HttpResponse::newHttpJsonResponse(error);
-      resp->setStatusCode(k400BadRequest);
-      callback(resp);
-      co_return;
-    }
+    // Disabled since we shouldn't update request status
+    // std::string request_status =
+    //     has_request_status ? (*json)["request_status"].asString() : "";
+
+    // Disabled since we shouldn't update request status
+    // // Validation: correct statuses include: open, cancelled, fulfilled,
+    // // in_progress,
+    // if (request_status != "open" && request_status != "in_progress" &&
+    //     request_status != "cancelled" &&
+    //     (request_status != "" && has_request_status) &&
+    //     request_status != "fulfilled") {
+    //   Json::Value error;
+    //   error["error"] = "Invalid request status";
+    //   auto resp = HttpResponse::newHttpJsonResponse(error);
+    //   resp->setStatusCode(k400BadRequest);
+    //   callback(resp);
+    //   co_return;
+    // }
 
     std::string location = has_location ? (*json)["location"].asString() : "";
     std::string price_range =
@@ -557,31 +647,59 @@ Task<> Community::update_post(
     std::string update_query =
         "UPDATE posts SET "
         "content = CASE WHEN $2 THEN $3 ELSE content END, "
-        "request_status = CASE WHEN $4 THEN $5 ELSE request_status END, "
-        "location = CASE WHEN $6 THEN $7 ELSE location END, "
-        "price_range = CASE WHEN $8 THEN $9 ELSE price_range END, "
-        "tags = CASE WHEN $10 THEN $11 ELSE tags END "
+        // "request_status = CASE WHEN $4 THEN $5 ELSE request_status END, "
+        "location = CASE WHEN $4 THEN $5 ELSE location END, "
+        "price_range = CASE WHEN $6 THEN $7 ELSE price_range END, "
+        "tags = CASE WHEN $8 THEN $9 ELSE tags END "
         "WHERE id = $1 "
         "RETURNING id";
 
-    // Execute the query with all parameters
-    auto update_result = co_await db->execSqlCoro(
-        update_query, std::stoi(id),
-        has_content,         // $2: has content flag
-        content,             // $3: content value
-        has_request_status,  // $4: has request_status flag
-        request_status,      // $5: request_status value
-        has_location,        // $6: has location flag
-        location,            // $7: location value
-        has_price_range,     // $8: has price_range flag
-        price_range,         // $9: price_range value
-        has_tags,            // $10: has tags flag
-        tags_str             // $11: tags value
-    );
+    auto transaction = co_await db->newTransactionCoro();
+    try {
+      int post_id = std::stoi(id);
+      // Execute the query with all parameters
+      auto update_result = co_await transaction->execSqlCoro(
+          update_query, post_id,
+          has_content,  // $2: has content flag
+          content,      // $3: content value
+          // has_request_status,  // $4: has request_status flag
+          // request_status,      // $5: request_status value
+          has_location,     // $4: has location flag
+          location,         // $5: location value
+          has_price_range,  // $6: has price_range flag
+          price_range,      // $7: price_range value
+          has_tags,         // $8: has tags flag
+          tags_str          // $9: tags value
+      );
 
-    if (update_result.size() > 0) {
-      // Send notification here:
+      if (update_result.size() < 1) {
+        throw std::runtime_error("Initial post update failed");
+      }
 
+      std::size_t media_array_size = media_array.size();
+      Json::Value processed_media = co_await process_media_attachments(
+          std::move(media_array), transaction, std::stoi(current_user_id),
+          "post", post_id);
+      if (processed_media == Json::nullValue ||
+          processed_media.size() < media_array_size) {
+        LOG_ERROR << " Some Media info was not found";
+        transaction->rollback();
+        std::string error_string;
+        for (const auto& media_item : processed_media) {
+          error_string += media_item["file_name"].asString() + ", ";
+        }
+        Json::Value error;
+        error["error"] = std::format(
+            "Media info not found or processed, only the following media items "
+            "were processed:\n{}",
+            error_string);
+        auto resp = HttpResponse::newHttpJsonResponse(error);
+        resp->setStatusCode(k400BadRequest);
+        callback(resp);
+        co_return;
+      }
+
+      // notification:
       std::string post_topic = create_topic("post", id);
       Json::Value post_data_json;
       post_data_json["type"] = "post_updated";
@@ -602,9 +720,12 @@ Task<> Community::update_post(
       ret["message"] = "Post updated successfully";
       auto resp = HttpResponse::newHttpJsonResponse(ret);
       callback(resp);
-    } else {
+    } catch (const std::exception& e) {
+      // Rollback the transaction on error
+      transaction->rollback();
+      LOG_ERROR << "Error updating post: " << e.what();
       Json::Value error;
-      error["error"] = "Failed to update post";
+      error["error"] = std::format("Failed to update post: {}", e.what());
       auto resp = HttpResponse::newHttpJsonResponse(error);
       resp->setStatusCode(k500InternalServerError);
       callback(resp);
@@ -734,7 +855,8 @@ Task<> Community::filter_posts(
     Json::Value posts{Json::arrayValue};
     for (const auto& row : result) {
       Json::Value post;
-      post["id"] = row["id"].as<int>();
+      int post_id = row["id"].as<int>();
+      post["id"] = post_id;
       post["user_id"] = row["user_id"].as<int>();
       post["username"] = row["username"].as<std::string>();
       post["content"] = row["content"].as<std::string>();
@@ -752,6 +874,7 @@ Task<> Community::filter_posts(
       post["subscription_count"] = row["subscription_count"].as<int>();
       post["is_subscribed"] = row["is_subscribed"].as<bool>();
 
+      post["media"] = co_await get_media_attachments("post", post_id);
       posts.append(post);
     }
     auto resp = HttpResponse::newHttpJsonResponse(posts);

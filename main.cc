@@ -8,7 +8,6 @@
 
 #include "services/service_manager.hpp"
 
-
 void print_help() {
   std::cout << "Usage: buyer-backend [OPTIONS]\n\n"
                "Options:\n"
@@ -89,7 +88,13 @@ int main(int argc, char* argv[]) {
     return 1;
   }
 
-  ServiceManager::get_instance().initialize();
+  try {
+    ServiceManager::get_instance().initialize();
+  } catch (const std::exception& e) {
+    std::puts(std::format("Error initializing service manager: {}", e.what())
+                  .c_str());
+    return 1;
+  }
 
   if (test_mode) {
     drogon::app().getLoop()->queueInLoop([]() {
@@ -98,6 +103,21 @@ int main(int argc, char* argv[]) {
           drogon::app().getDbClient()->connectionInfo());
     });
   }
+
+  // Create buckets
+  drogon::app().getLoop()->runInLoop([]() {
+    drogon::sync_wait([]() -> drogon::Task<void> {
+      bool bucket_created = co_await ServiceManager::get_instance()
+                                .get_s3_service()
+                                .ensure_bucket_exists("media");
+      if (!bucket_created) {
+        LOG_ERROR << "Failed to create or verify 'media' bucket";
+        exit(1);
+      } else {
+        LOG_INFO << "Media bucket is ready";
+      }
+    }());
+  });
 
   drogon::app().run();
 

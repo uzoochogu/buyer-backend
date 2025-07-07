@@ -16,6 +16,8 @@
 #include <vector>
 
 #include "../services/service_manager.hpp"
+#include "../utilities/conversion.hpp"
+#include "scenario_specific_utils.hpp"
 
 using namespace drogon;
 using namespace drogon::orm;
@@ -67,7 +69,6 @@ Task<> Offers::get_offers_for_post(
           "WHERE o.post_id = $1 AND (o.is_public = TRUE OR o.user_id = $2) "
           "ORDER BY o.created_at DESC";
 
-      // Execute query with two parameters
       offers_result = co_await db->execSqlCoro(query, std::stoi(post_id),
                                                std::stoi(current_user_id));
     }
@@ -75,7 +76,8 @@ Task<> Offers::get_offers_for_post(
     Json::Value offers_array(Json::arrayValue);
     for (const auto& row : offers_result) {
       Json::Value offer;
-      offer["id"] = row["id"].as<int>();
+      int offer_id = row["id"].as<int>();
+      offer["id"] = offer_id;
       offer["post_id"] = row["post_id"].as<int>();
       offer["user_id"] = row["user_id"].as<int>();
       offer["username"] = row["username"].as<std::string>();
@@ -89,6 +91,7 @@ Task<> Offers::get_offers_for_post(
       offer["updated_at"] = row["updated_at"].as<std::string>();
       offer["is_post_owner"] = is_post_owner;
 
+      offer["media"] = co_await get_media_attachments("offer", offer_id);
       offers_array.append(offer);
     }
 
@@ -114,12 +117,36 @@ Task<> Offers::create_offer(
   std::string current_user_id =
       req->getAttributes()->get<std::string>("current_user_id");
 
+  // Validation: Malformed route
+  if (!convert::string_to_int(post_id).has_value() ||
+      convert::string_to_int(post_id).value() < 0) {
+    Json::Value error;
+    error["error"] = "Invalid post id";
+    auto resp = HttpResponse::newHttpJsonResponse(error);
+    resp->setStatusCode(k400BadRequest);
+    callback(resp);
+    co_return;
+  }
+
   // Extract offer data
   std::string title = (*json)["title"].asString();
   std::string description = (*json)["description"].asString();
   double price = (*json)["price"].asDouble();
   bool is_public =
       json->isMember("is_public") ? (*json)["is_public"].asBool() : true;
+
+  Json::Value media_array = json->isMember("media")
+                                ? (*json)["media"]
+                                : Json::Value(Json::arrayValue);
+
+  if (media_array.size() > MAX_MEDIA_SIZE) {
+    Json::Value error;
+    error["error"] = "Maximum of 5 media items allowed per offer";
+    auto resp = HttpResponse::newHttpJsonResponse(error);
+    resp->setStatusCode(k400BadRequest);
+    callback(resp);
+    co_return;
+  }
 
   auto db = app().getDbClient();
 
@@ -128,7 +155,7 @@ Task<> Offers::create_offer(
     auto result = co_await db->execSqlCoro(
         "SELECT user_id FROM posts WHERE id = $1", std::stoi(post_id));
 
-    if (result.size() == 0) {
+    if (result.size() < 1) {
       Json::Value error;
       error["error"] = "Post not found";
       auto resp = HttpResponse::newHttpJsonResponse(error);
@@ -149,73 +176,87 @@ Task<> Offers::create_offer(
       co_return;
     }
 
-    // Insert the offer
-    auto insert_result = co_await db->execSqlCoro(
-        "INSERT INTO offers (post_id, user_id, title, description, price, "
-        "original_price, is_public, status) "
-        "VALUES ($1, $2, $3, $4, $5, $6, $7, 'pending') "
-        "RETURNING id, created_at",
-        std::stoi(post_id), std::stoi(current_user_id), title, description,
-        price, price, is_public);
+    auto transaction = co_await db->newTransactionCoro();
+    try {
+      auto insert_result = co_await transaction->execSqlCoro(
+          "INSERT INTO offers (post_id, user_id, title, description, price, "
+          "original_price, is_public, status) "
+          "VALUES ($1, $2, $3, $4, $5, $6, $7, 'pending') "
+          "RETURNING id, created_at",
+          std::stoi(post_id), std::stoi(current_user_id), title, description,
+          price, price, is_public);
 
-    if (insert_result.size() > 0) {
-      int offer_id = insert_result[0]["id"].as<int>();
-
-      try {
-        // Create a notification for the post owner
-        co_await db->execSqlCoro(
-            "INSERT INTO offer_notifications (offer_id, user_id, is_read) "
-            "VALUES ($1, $2, FALSE)",
-            offer_id, post_user_id);
-
-        // notification:
-
-        // Auto-subscribe offer owner to their offer
-        std::string offer_topic =
-            create_topic("offer", insert_result[0]["id"].as<std::string>());
-        ServiceManager::get_instance().get_subscriber().subscribe(offer_topic);
-        ServiceManager::get_instance().get_connection_manager().subscribe(
-            offer_topic, current_user_id);
-        store_user_subscription(current_user_id, offer_topic);
-        LOG_INFO << "User " << current_user_id
-                 << " subscribed to offer topic: " << offer_topic;
-
-        // create offer data
-        Json::Value offer_data_json;
-        offer_data_json["type"] = "offer_created";
-        offer_data_json["id"] = offer_id;
-        offer_data_json["message"] =
-            "New Offer: " + std::to_string(price) + ", " + title;
-        offer_data_json["modified_at"] =
-            insert_result[0]["created_at"].as<std::string>();
-
-        Json::FastWriter writer;
-        std::string offer_data = writer.write(offer_data_json);
-
-        // publish to post topic
-        std::string post_topic = create_topic("post", post_id);
-        ServiceManager::get_instance().get_publisher().publish(post_topic,
-                                                               offer_data);
-        LOG_INFO << "Published new offer to post channel: " << post_topic;
-
-        Json::Value ret;
-        ret["status"] = "success";
-        ret["offer_id"] = offer_id;
-        auto resp = HttpResponse::newHttpJsonResponse(ret);
-        callback(resp);
-      } catch (const DrogonDbException& e) {
-        LOG_ERROR << "Database error creating notification: "
-                  << e.base().what();
-        Json::Value ret;
-        ret["status"] = "success";
-        ret["offer_id"] = offer_id;
-        ret["warning"] = "Offer created but notification failed";
-        auto resp = HttpResponse::newHttpJsonResponse(ret);
-        callback(resp);
+      if (insert_result.size() < 1) {
+        throw std::runtime_error("Initial insert failed");
       }
-    } else {
+
+      int offer_id = insert_result[0]["id"].as<int>();
+      std::string created_at = insert_result[0]["created_at"].as<std::string>();
+      std::size_t media_array_size = media_array.size();
+      Json::Value processed_media = co_await process_media_attachments(
+          std::move(media_array), transaction, std::stoi(current_user_id),
+          "offer", offer_id);
+      if (processed_media == Json::nullValue ||
+          processed_media.size() < media_array_size) {
+        LOG_ERROR << " Some Media info was not found";
+        transaction->rollback();
+        std::string error_string;
+        for (const auto& media_item : processed_media) {
+          error_string += media_item["file_name"].asString() + ", ";
+        }
+        Json::Value error;
+        error["error"] = std::format(
+            "Media info not found or processed, only the following media items "
+            "were processed:\n{}",
+            error_string);
+        auto resp = HttpResponse::newHttpJsonResponse(error);
+        resp->setStatusCode(k400BadRequest);
+        callback(resp);
+        co_return;
+      }
+
+      // notification:
+      // post owner
+      co_await transaction->execSqlCoro(
+          "INSERT INTO offer_notifications (offer_id, user_id, is_read) "
+          "VALUES ($1, $2, FALSE)",
+          offer_id, post_user_id);
+
+      // Auto-subscribe offer owner to their offer
+      std::string offer_topic =
+          create_topic("offer", insert_result[0]["id"].as<std::string>());
+      ServiceManager::get_instance().get_subscriber().subscribe(offer_topic);
+      ServiceManager::get_instance().get_connection_manager().subscribe(
+          offer_topic, current_user_id);
+      store_user_subscription(current_user_id, offer_topic);
+      LOG_INFO << "User " << current_user_id
+               << " subscribed to offer topic: " << offer_topic;
+
+      Json::Value offer_data_json;
+      offer_data_json["type"] = "offer_created";
+      offer_data_json["id"] = offer_id;
+      offer_data_json["message"] =
+          "New Offer: " + std::to_string(price) + ", " + title;
+      offer_data_json["modified_at"] = created_at;
+
+      Json::FastWriter writer;
+      std::string offer_data = writer.write(offer_data_json);
+
+      std::string post_topic = create_topic("post", post_id);
+      ServiceManager::get_instance().get_publisher().publish(post_topic,
+                                                             offer_data);
+      LOG_INFO << "Published new offer to post channel: " << post_topic;
+
+      Json::Value ret;
+      ret["status"] = "success";
+      ret["offer_id"] = offer_id;
+      auto resp = HttpResponse::newHttpJsonResponse(ret);
+      callback(resp);
+    } catch (const std::exception& e) {
+      transaction->rollback();
+      LOG_ERROR << "Error creating offer: " << e.what();
       Json::Value error;
-      error["error"] = "Failed to create offer";
+      error["error"] = std::format("Error creating offer: {}", e.what());
       auto resp = HttpResponse::newHttpJsonResponse(error);
       resp->setStatusCode(k500InternalServerError);
       callback(resp);
@@ -240,7 +281,19 @@ Task<> Offers::get_offer(HttpRequestPtr req,
   std::string current_user_id =
       req->getAttributes()->get<std::string>("current_user_id");
 
+  // Validation: Malformed route
+  if (!convert::string_to_int(id).has_value() ||
+      convert::string_to_int(id).value() < 0) {
+    Json::Value error;
+    error["error"] = "Invalid offer id";
+    auto resp = HttpResponse::newHttpJsonResponse(error);
+    resp->setStatusCode(k400BadRequest);
+    callback(resp);
+    co_return;
+  }
+
   try {
+    int current_user = std::stoi(current_user_id);
     auto result = co_await db->execSqlCoro(
         "SELECT o.*, u.username, p.user_id as post_owner_id "
         "FROM offers o "
@@ -249,7 +302,7 @@ Task<> Offers::get_offer(HttpRequestPtr req,
         "WHERE o.id = $1",
         std::stoi(id));
 
-    if (result.size() == 0) {
+    if (result.size() < 1) {
       Json::Value error;
       error["error"] = "Offer not found";
       auto resp = HttpResponse::newHttpJsonResponse(error);
@@ -264,10 +317,10 @@ Task<> Offers::get_offer(HttpRequestPtr req,
     bool is_public = row["is_public"].as<bool>();
 
     // Check if user has permission to view this offer
-    bool can_view = (offer_user_id == std::stoi(current_user_id)) ||
-                    (post_owner_id == std::stoi(current_user_id)) || is_public;
+    bool has_permission = (current_user == offer_user_id ||
+                           current_user == post_owner_id || is_public);
 
-    if (!can_view) {
+    if (!has_permission) {
       Json::Value error;
       error["error"] = "You don't have permission to view this offer";
       auto resp = HttpResponse::newHttpJsonResponse(error);
@@ -289,8 +342,10 @@ Task<> Offers::get_offer(HttpRequestPtr req,
     offer["status"] = row["status"].as<std::string>();
     offer["created_at"] = row["created_at"].as<std::string>();
     offer["updated_at"] = row["updated_at"].as<std::string>();
-    offer["is_owner"] = (offer_user_id == std::stoi(current_user_id));
-    offer["is_post_owner"] = (post_owner_id == std::stoi(current_user_id));
+    offer["is_owner"] = (current_user == offer_user_id);
+    offer["is_post_owner"] = (current_user == post_owner_id);
+
+    offer["media"] = co_await get_media_attachments("offer", std::stoi(id));
 
     auto resp = HttpResponse::newHttpJsonResponse(offer);
     callback(resp);
@@ -314,6 +369,30 @@ Task<> Offers::update_offer(
   std::string current_user_id =
       req->getAttributes()->get<std::string>("current_user_id");
 
+  // Validation: Malformed route
+  if (!convert::string_to_int(id).has_value() ||
+      convert::string_to_int(id).value() < 0) {
+    Json::Value error;
+    error["error"] = "Invalid offer id";
+    auto resp = HttpResponse::newHttpJsonResponse(error);
+    resp->setStatusCode(k400BadRequest);
+    callback(resp);
+    co_return;
+  }
+
+  Json::Value media_array = json->isMember("media")
+                                ? (*json)["media"]
+                                : Json::Value(Json::arrayValue);
+
+  if (media_array.size() > MAX_MEDIA_SIZE) {
+    Json::Value error;
+    error["error"] = "Maximum of 5 media items allowed per offer";
+    auto resp = HttpResponse::newHttpJsonResponse(error);
+    resp->setStatusCode(k400BadRequest);
+    callback(resp);
+    co_return;
+  }
+
   auto db = app().getDbClient();
 
   try {
@@ -321,7 +400,7 @@ Task<> Offers::update_offer(
     auto result = co_await db->execSqlCoro(
         "SELECT user_id, status FROM offers WHERE id = $1", std::stoi(id));
 
-    if (result.size() == 0) {
+    if (result.size() < 1) {
       Json::Value error;
       error["error"] = "Offer not found";
       auto resp = HttpResponse::newHttpJsonResponse(error);
@@ -366,28 +445,59 @@ Task<> Offers::update_offer(
     double price = has_price ? (*json)["price"].asDouble() : 0.0;
     bool is_public = has_is_public ? (*json)["is_public"].asBool() : true;
 
-    // CASE expressions to handle optional updates
-    auto update_result = co_await db->execSqlCoro(
-        "UPDATE offers SET "
-        "title = CASE WHEN $2 THEN $3 ELSE title END, "
-        "description = CASE WHEN $4 THEN $5 ELSE description END, "
-        "price = CASE WHEN $6 THEN $7 ELSE price END, "
-        "is_public = CASE WHEN $8 THEN $9 ELSE is_public END, "
-        "updated_at = NOW() "
-        "WHERE id = $1 "
-        "RETURNING id, updated_at",
-        std::stoi(id), has_title, title, has_description, description,
-        has_price, price, has_is_public, is_public);
+    auto transaction = co_await db->newTransactionCoro();
 
-    if (update_result.size() > 0) {
+    try {
+      // CASE expressions to handle optional updates
+      auto update_result = co_await db->execSqlCoro(
+          "UPDATE offers SET "
+          "title = CASE WHEN $2 THEN $3 ELSE title END, "
+          "description = CASE WHEN $4 THEN $5 ELSE description END, "
+          "price = CASE WHEN $6 THEN $7 ELSE price END, "
+          "is_public = CASE WHEN $8 THEN $9 ELSE is_public END, "
+          "updated_at = NOW() "
+          "WHERE id = $1 "
+          "RETURNING id, updated_at",
+          std::stoi(id), has_title, title, has_description, description,
+          has_price, price, has_is_public, is_public);
+
+      if (update_result.size() < 1) {
+        throw std::runtime_error("initial update failed");
+      }
+
+      std::string updated_at = update_result[0]["updated_at"].as<std::string>();
+
+      // Update media
+      std::size_t media_array_size = media_array.size();
+      Json::Value processed_media = co_await process_media_attachments(
+          std::move(media_array), transaction, stoi(current_user_id), "offer",
+          std::stoi(id));
+      if (processed_media == Json::nullValue ||
+          processed_media.size() < media_array_size) {
+        LOG_ERROR << " Some Media info was not found";
+        transaction->rollback();
+        std::string error_string;
+        for (const auto& media_item : processed_media) {
+          error_string += media_item["file_name"].asString() + ", ";
+        }
+        Json::Value error;
+        error["error"] = std::format(
+            "Media info not found or processed, only the following media items "
+            "were processed:\n{}",
+            error_string);
+        auto resp = HttpResponse::newHttpJsonResponse(error);
+        resp->setStatusCode(k400BadRequest);
+        callback(resp);
+        co_return;
+      }
+
       // notification
       std::string offer_topic = create_topic("offer", id);
       Json::Value offer_data_json;
       offer_data_json["type"] = "offer_updated";
       offer_data_json["id"] = id;
       offer_data_json["message"] = "Offer updated";
-      offer_data_json["modified_at"] =
-          update_result[0]["updated_at"].as<std::string>();
+      offer_data_json["modified_at"] = updated_at;
 
       Json::FastWriter writer;
       std::string offer_data = writer.write(offer_data_json);
@@ -397,11 +507,18 @@ Task<> Offers::update_offer(
       Json::Value ret;
       ret["status"] = "success";
       ret["message"] = "Offer updated successfully";
+      ret["offer_id"] = id;
+      if (processed_media.size() > 0) {
+        ret["media"] = processed_media;
+      }
       auto resp = HttpResponse::newHttpJsonResponse(ret);
       callback(resp);
-    } else {
+
+    } catch (const std::exception& e) {
+      transaction->rollback();
+      LOG_ERROR << "Error updating offer: " << e.what();
       Json::Value error;
-      error["error"] = "Failed to update offer";
+      error["error"] = std::format("Error updating offer: {}", e.what());
       auto resp = HttpResponse::newHttpJsonResponse(error);
       resp->setStatusCode(k500InternalServerError);
       callback(resp);
@@ -880,10 +997,8 @@ Task<> Offers::accept_counter_offer(
           "UPDATE posts SET request_status = 'fulfilled' WHERE id = $1",
           post_id);
 
-      // notify only after a successful commit
-      // notify the accepted offer
+      // notify accepted offer only after a successful commit
       std::string offer_topic = create_topic("offer", id);
-      // create offer data
       Json::Value offer_data_json;
       offer_data_json["type"] = "offer_accepted";
       offer_data_json["id"] = id;
@@ -1063,7 +1178,8 @@ Task<> Offers::get_my_offers(
     Json::Value offers_array(Json::arrayValue);
     for (const auto& row : result) {
       Json::Value offer;
-      offer["id"] = row["id"].as<int>();
+      int offer_id = row["id"].as<int>();
+      offer["id"] = offer_id;
       offer["post_id"] = row["post_id"].as<int>();
       offer["post_content"] = row["post_content"].as<std::string>();
       offer["post_owner_username"] =
@@ -1077,6 +1193,7 @@ Task<> Offers::get_my_offers(
       offer["created_at"] = row["created_at"].as<std::string>();
       offer["updated_at"] = row["updated_at"].as<std::string>();
 
+      offer["media"] = co_await get_media_attachments("offer", offer_id);
       offers_array.append(offer);
     }
 
@@ -1115,7 +1232,8 @@ Task<> Offers::get_received_offers(
     Json::Value offers_array(Json::arrayValue);
     for (const auto& row : result) {
       Json::Value offer;
-      offer["id"] = row["id"].as<int>();
+      int offer_id = row["id"].as<int>();
+      offer["id"] = offer_id;
       offer["post_id"] = row["post_id"].as<int>();
       offer["post_content"] = row["post_content"].as<std::string>();
       offer["user_id"] = row["user_id"].as<int>();
@@ -1129,6 +1247,7 @@ Task<> Offers::get_received_offers(
       offer["created_at"] = row["created_at"].as<std::string>();
       offer["updated_at"] = row["updated_at"].as<std::string>();
 
+      offer["media"] = co_await get_media_attachments("offer", offer_id);
       offers_array.append(offer);
     }
 
