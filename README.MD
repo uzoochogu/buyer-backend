@@ -19,17 +19,29 @@ vcpkg can be used to manage library dependencies.
 
 Below are some of the dependencies that are used in the project.
 
-- [drogon](https://github.com/drogonframework/drogon) - with some submodules and sub-dependencies.
+- [drogon](https://github.com/drogonframework/drogon) - with some submodules and sub-dependencies like JsonCpp.
 - [argon2](https://github.com/P-H-C/phc-winner-argon2.git)
 - [jwt-cpp](https://github.com/Thalhammer/jwt-cpp)
+- [cppzmq](https://github.com/zeromq/cppzmq) - Pub/Sub, Notification system.
+- [redis-plus-plus](https://github.com/sewenew/redis-plus-plus) - Not currently used or but code exists.
+- [boost-uuid](https://www.boost.org/libs/uuid) - Faster UUID than Drogon UUID utility.
+- [mlpack](https://github.com/mlpack/mlpack) - GPS clustering. Includes armadillo.
+- [armdillo](https://arma.sourceforge.net/) - Installed with mlpack.
+- [aws-sdk-cpp](https://github.com/aws/aws-sdk-cpp) - Only using S3 component for S3 compatible Minio Service.
 
 Installing using vcpkg
 
 ```bash
 # triplet_name here depends on your system e.g. x64-windows-static or x64-windows
+# you can ignore :triplet_name as defaults are reasonable for most platforms
 ./vcpkg install drogon[core,ctl,orm,postgres]:triplet_name --recurse
 ./vcpkg install jwt-cpp:triplet_name
 ./vcpkg install argon2[hwopt,tool]:triplet_name
+./vcpkg install cppzmq:triplet_name
+./vcpkg install redis-plus-plus[async,tls,cxx17]:triplet_name  # currently not used
+./vcpkg install boost-uuid:triplet_name
+./vcpkg install mlpack:triplet_name # installs armadillo
+./vcpkg install aws-sdk-cpp[s3]:triplet_name
 ```
 
 More information on setting up the drogon-ctl tool can be found [in this guide](https://github.com/drogonframework/drogon/wiki/ENG-02-Installation#Drogon-Installation)
@@ -171,6 +183,8 @@ psql -U postgres -d agentbackend -f migrations/001_complete_schema.sql
 psqll -U postgres -d buyer_app_test -f migrations/001_complete_schema.sql
 ```
 
+> Ensure your Postgres installation has postgis extension support as this migration, creates the extension.
+
 ### Seeding Data
 
 ```bash
@@ -179,6 +193,42 @@ psql -U postgres -d agentbackend -f seeds/001_complete_seed_data.sql
 # for test DB ( or auto-seed using the configure_tests cmake target)
 psql -U postgres -d buyer_app_test -f seeds/001_complete_seed_data.sql
 ```
+
+## Media Server
+
+Minio Object Store is used for storing and serving media files. It has an AWS S3 compatible API.
+
+### Installation
+
+```bash
+# Install Minio
+docker run --name minio-media-server -p 9000:9000 -p 9001:9001 -v /c/dev/media_store:/data -e "MINIO_ROOT_USER=minioadmin" -e "MINIO_ROOT_PASSWORD=password" minio/minio server /data --console-address ":9001"
+```
+
+Replace `-v /c/dev/media_store:/data` with the path to the media store directory on your machine for persistent storage.
+If you modify the credentials, make sure to update your created `config.json` and `test_config-sample.json` files.
+
+## Using Docker Compose (Experimental)
+
+A [`docker-compose.yml`](./docker-compose.yml) file is provided for running the postgres database and media server.
+For now, you will need to enter the container and run the setup scripts manually.
+
+You can compose up and down the containers using the following commands:
+
+```bash
+# Compose up
+docker compose up -d
+
+# Compose down
+docker compose down
+
+# subsequent runs can be started and stopped using
+docker compose start
+
+docker compose stop
+```
+
+> Note that this is still experimental and may not work as expected.
 
 ## Debugging tips
 

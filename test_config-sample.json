@@ -1,37 +1,41 @@
 {
-    "db_clients": [
-      {
-        "name": "default",
-        "rdbms": "postgresql",
-        "host": "127.0.0.1",
-        "port": 5432,
-        "dbname": "buyer_app_test",
-        "user": "postgres",
-        "passwd": "",
-        "is_fast": false,
-        "connection_number": 1
-      }
-    ],
-    "app": {
-      "number_of_threads": 1,
-      "document_root": "./",
-      "use_sendfile": true,
-      "upload_path": "uploads",
-      "file_types": [
-        "gif",
-        "png",
-        "jpg",
-        "js",
-        "css",
-        "html",
-        "ico",
-        "swf",
-        "xap",
-        "apk",
-        "cur",
-        "xml"
-      ],
-      "jwt_secret": "your_test_jwt_secret"
+  "db_clients": [
+    {
+      "name": "default",
+      "rdbms": "postgresql",
+      "host": "127.0.0.1",
+      "port": 5432,
+      "dbname": "buyer_app_test",
+      "user": "postgres",
+      "passwd": "",
+      "is_fast": false,
+      "connection_number": 1
     }
+  ],
+  "app": {
+    "number_of_threads": 1,
+    "document_root": "./",
+    "use_sendfile": true,
+    "upload_path": "uploads",
+    "file_types": [
+      "gif",
+      "png",
+      "jpg",
+      "js",
+      "css",
+      "html",
+      "ico",
+      "swf",
+      "xap",
+      "apk",
+      "cur",
+      "xml"
+    ]
+  },
+  "custom_config": {
+    "jwt_secret": "your_secure_random_production_secret",
+    "minio_endpoint": "http://localhost:9000",
+    "minio_access_key": "minioadmin",
+    "minio_secret_key": "minioadmin"
   }
-  
+}
