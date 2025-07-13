@@ -1,13 +1,25 @@
 # Buyer Backend
 
-Internal development guide for the buyer backend service.
+Demo app for a Drogon C++ Backend Application.
 
-## Quick Start
+It demonstrates the following:
 
-### Directory Paths
+* Authentication using JWT with a simple refresh mechanism and an Auth middleware.
+* Password hashing with Argon.
+* Database queries with coroutines.
+* Pub/Sub system for notifications using ZeroMQ.
+* Clustering of geographic coordinates using mlpack.
+* Media management with S3 compatible Minio Object Store and presigned links.
+* Integration tests.
 
-- Frontend: `~/Documents/GitHub/dev/agent-app/buyer-frontend`
-- Backend: `~/Documents/GitHub/dev/agent-app/buyer-backend`
+## Architecture
+
+![Application Architecture](./images/backend-arch.png)
+
+### Related repositories
+
+* Frontend: [`buyer-frontend`](https://github.com/uzoochogu/buyer-frontend)
+* Backend: `buyer-backend` (this repository)
 
 Please note working directory and relative paths differs based on build system e.g. MSVC uses Debug/Release folders
 
@@ -15,30 +27,38 @@ Please note working directory and relative paths differs based on build system e
 
 Install Postgres on your test machine, either [locally](https://www.postgresql.org/download/) or through [docker](https://hub.docker.com/_/postgres).
 
-vcpkg can be used to manage library dependencies.
+[`vcpkg`](https://vcpkg.io/en/packages?query=) can be used to manage library dependencies. Here is a [`guide`](https://learn.microsoft.com/en-gb/vcpkg/get_started/get-started) to installing it.
 
-Below are some of the dependencies that are used in the project.
+Below are some of the dependencies that are used in the project:
 
 - [drogon](https://github.com/drogonframework/drogon) - with some submodules and sub-dependencies like JsonCpp.
 - [argon2](https://github.com/P-H-C/phc-winner-argon2.git)
 - [jwt-cpp](https://github.com/Thalhammer/jwt-cpp)
 - [cppzmq](https://github.com/zeromq/cppzmq) - Pub/Sub, Notification system.
-- [redis-plus-plus](https://github.com/sewenew/redis-plus-plus) - Not currently used or but code exists.
+- ~~[redis-plus-plus](https://github.com/sewenew/redis-plus-plus)~~ - Not currently used or but code stub is present.
 - [boost-uuid](https://www.boost.org/libs/uuid) - Faster UUID than Drogon UUID utility.
-- [mlpack](https://github.com/mlpack/mlpack) - GPS clustering. Includes armadillo.
-- [armdillo](https://arma.sourceforge.net/) - Installed with mlpack.
+- [mlpack](https://github.com/mlpack/mlpack) - GPS coordinates clustering. Includes armadillo.
+- [armdillo](https://arma.sourceforge.net/) - Installed with along side mlpack.
 - [aws-sdk-cpp](https://github.com/aws/aws-sdk-cpp) - Only using S3 component for S3 compatible Minio Service.
 
-Installing using vcpkg
+Installing using vcpkg:
 
 ```bash
+# Installing within the project:
+# in project root, run this
+vcpkg install
+
+
+# OR
+
+# Installing globally
 # triplet_name here depends on your system e.g. x64-windows-static or x64-windows
 # you can ignore :triplet_name as defaults are reasonable for most platforms
 ./vcpkg install drogon[core,ctl,orm,postgres]:triplet_name --recurse
 ./vcpkg install jwt-cpp:triplet_name
 ./vcpkg install argon2[hwopt,tool]:triplet_name
 ./vcpkg install cppzmq:triplet_name
-./vcpkg install redis-plus-plus[async,tls,cxx17]:triplet_name  # currently not used
+./vcpkg install redis-plus-plus[async,tls,cxx17]:triplet_name  # currently not used, so can be ignored.
 ./vcpkg install boost-uuid:triplet_name
 ./vcpkg install mlpack:triplet_name # installs armadillo
 ./vcpkg install aws-sdk-cpp[s3]:triplet_name
@@ -50,6 +70,9 @@ More information on setting up the drogon-ctl tool can be found [in this guide](
 
 ```bash
 # Configure CMake
+
+# if you installed globally you need to use vcpkg.cmake path
+# as your toolchain file, else you can ignore it.
 cmake -B ./build -S . "-DCMAKE_TOOLCHAIN_FILE=C:/dev/vcpkg/scripts/buildsystems/vcpkg.cmake"
 
 # Build
@@ -232,19 +255,19 @@ docker compose stop
 
 ## Debugging tips
 
-- If you are getting a 500 error instead of a 400 error, then you are not validating the data coming from the request (body and Headers).
+* If you are getting a 500 error instead of a 400 error, then you are not validating the data coming from the request (body and Headers).
 
-- If you are getting 200 or 201 error when you aren't supposed to, then you are not validating your input data. Maybe empty data?
+* If you are getting 200 or 201 error when you aren't supposed to, then you are not validating your input data. Maybe empty data?
 
-- Note where you put logs, putting logs in the test side outputs in the test run, logs in the normal application outputs in the server logs
+* Note where you add logs. Putting logs in the test side outputs in the test run, logs in the normal application outputs in the server logs
 
-- Try to initialize the Json values as much as possible. Especially Array responses.
+* Try to initialize the Json values as much as possible. Especially Array responses.
 
 - Using the `["key"]` accessor in JsonCpp default constructs that field if it doesn't exists, prefer `.isMember("key")` to check for membership.
 
-- If you want to inspect the Database after a test run, remove the teardown delete queries, recompile and rerun tests. This way you have access to it after a run for more better investigations.
+* If you want to inspect the Database after a test run, remove the teardown delete queries, recompile and rerun tests. This way you have access to it after a run for more better investigations.
 
-- Use Drogon LOG_INFO and LOG_ERROR macros for logging. For Json responses this helps:
+* Use Drogon LOG_INFO and LOG_ERROR macros for logging. For Json responses this helps:
 
 ```cpp
   LOG_INFO << json_response.toStyledString();
