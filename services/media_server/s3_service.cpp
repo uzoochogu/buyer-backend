@@ -46,9 +46,6 @@ drogon::Task<std::string> S3Service::generate_presigned_url(
     const std::string &bucket_name, const std::string &object_key,
     drogon::HttpMethod method, const std::string &content_type,
     long long expiration_sec) {
-  // LOG_INFO << "Generating presigned URL for " << bucket_name << "/"
-  //          << object_key;
-
   Aws::Http::HeaderValueCollection headers;
   std::string url;
 
@@ -56,7 +53,6 @@ drogon::Task<std::string> S3Service::generate_presigned_url(
     url = s3_client_->GeneratePresignedUrl(bucket_name, object_key,
                                            Aws::Http::HttpMethod::HTTP_GET,
                                            expiration_sec);
-    LOG_INFO << "Generated URL: " << url;
     co_return url;
   } else if (method == drogon::HttpMethod::Put) {
     headers["Content-Type"] = content_type;  // for better browser compatibility
