@@ -566,6 +566,7 @@ FodyWeavers.xsd
 
 build*/
 models/
+vcpkg_installed/
 
 # Configurations
 config.json

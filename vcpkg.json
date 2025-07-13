@@ -1,0 +1,40 @@
+{
+  "name": "buyer-backend",
+  "version": "1.0.0",
+  "description": "Demo app for a Drogon C++ Application",
+  "dependencies": [
+    {
+      "name": "argon2",
+      "features": [
+        "hwopt",
+        "tool"
+      ]
+    },
+    {
+      "name": "aws-sdk-cpp",
+      "features": [
+        "s3"
+      ]
+    },
+    "boost-uuid",
+    "cppzmq",
+    {
+      "name": "drogon",
+      "features": [
+        "ctl",
+        "orm",
+        "postgres"
+      ]
+    },
+    "jwt-cpp",
+    "mlpack",
+    {
+      "name": "redis-plus-plus",
+      "features": [
+        "async",
+        "cxx17",
+        "tls"
+      ]
+    }
+  ]
+}
