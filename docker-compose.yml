@@ -9,11 +9,10 @@ services:
       POSTGRES_DB: agentbackend
       POSTGRES_USER: postgres
       POSTGRES_PASSWORD: mypassword
-      POSTGRES_HOST_AUTH_METHOD: trust
     ports:
       - "5432:5432"
     volumes:
-      - .volumes/postgres-main-data:/var/lib/postgresql/data
+      - .volumes/postgres-main-data:/var/lib/postgresql/data 700
       - ./migrations/001_complete_schema.sql:/docker-entrypoint-initdb.d/001_complete_schema.sql:ro
       - ./seeds/001_complete_seed_data.sql:/docker-entrypoint-initdb.d/001_complete_seed_data.sql:ro
     networks:
@@ -69,7 +68,30 @@ services:
       timeout: 20s
       retries: 3
     restart: unless-stopped
-
+  # # Buyer Backend C++ Application (Enable it by uncommenting)
+  # buyer-backend:
+  #   build:
+  #     context: .
+  #     dockerfile: Dockerfile
+  #   container_name: buyer-backend-app
+  #   environment:
+  #     DATABASE_URL: postgres://postgres:mypassword@postgres-main:5432/agentbackend
+  #     MINIO_ENDPOINT: minio:9000
+  #     MINIO_ACCESS_KEY: minioadmin
+  #     MINIO_SECRET_KEY: mypassword
+  #   ports:
+  #     - "5555:5555"
+  #   depends_on:
+  #     - postgres-main
+  #     - minio
+  #   networks:
+  #     - buyer-backend-network
+  #   healthcheck:
+  #     test: ["CMD-SHELL", "curl -f http://localhost:5555/"]
+  #     interval: 30s
+  #     timeout: 20s
+  #     retries: 3
+  #   restart: unless-stopped
 networks:
   buyer-backend-network:
     driver: bridge

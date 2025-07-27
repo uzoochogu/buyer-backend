@@ -878,7 +878,6 @@ Task<> Offers::accept_counter_offer(
     }
 
     int offer_user_id = result[0]["user_id"].as<int>();
-    int post_owner_id = result[0]["post_owner_id"].as<int>();
     int post_id = result[0]["post_id"].as<int>();
     std::string status = result[0]["status"].as<std::string>();
 

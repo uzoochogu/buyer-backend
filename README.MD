@@ -38,7 +38,7 @@ Below are some of the dependencies that are used in the project:
 - ~~[redis-plus-plus](https://github.com/sewenew/redis-plus-plus)~~ - Not currently used or but code stub is present.
 - [boost-uuid](https://www.boost.org/libs/uuid) - Faster UUID than Drogon UUID utility.
 - [mlpack](https://github.com/mlpack/mlpack) - GPS coordinates clustering. Includes armadillo.
-- [armdillo](https://arma.sourceforge.net/) - Installed with along side mlpack.
+- [armdillo](https://arma.sourceforge.net/) - Installed along side mlpack.
 - [aws-sdk-cpp](https://github.com/aws/aws-sdk-cpp) - Only using S3 component for S3 compatible Minio Service.
 
 Installing using vcpkg:
@@ -71,14 +71,17 @@ More information on setting up the drogon-ctl tool can be found [in this guide](
 ```bash
 # Configure CMake
 
-# if you installed globally you need to use vcpkg.cmake path
-# as your toolchain file, else you can ignore it.
+# if you installed vcpkg packages globally, you may need to turn off manifest mode
+# and should provide the vcpkg.cmake path
+cmake -B ./build -S . "-DCMAKE_TOOLCHAIN_FILE=C:/dev/vcpkg/scripts/buildsystems/vcpkg.cmake" -DVCPKG_MANIFEST_MODE=OFF
+
+# OR using manifest mode (packages are automatically installed project level)
 cmake -B ./build -S . "-DCMAKE_TOOLCHAIN_FILE=C:/dev/vcpkg/scripts/buildsystems/vcpkg.cmake"
 
 # Build
 cmake --build build --config Release --parallel
 
-# Build with clean
+# clean build
 cmake --build build --config Release --parallel --clean-first
 ```
 
@@ -120,8 +123,10 @@ drogon_ctl create filter AuthMiddleware
 drogon_ctl create controller -h api::v1::login
 
 # Create Model - Note that we currently don't use the drogon orm
-drogon_ctl create model users
+drogon_ctl create model ./models
 ```
+
+To see the full list of commands provided by `drogon_ctl`, use `drogon_ctl --help` and `drogon_ctl help create`.
 
 ## Testing Backend
 
@@ -233,8 +238,9 @@ If you modify the credentials, make sure to update your created `config.json` an
 
 ## Using Docker Compose (Experimental)
 
-A [`docker-compose.yml`](./docker-compose.yml) file is provided for running the postgres database and media server.
-For now, you will need to enter the container and run the setup scripts manually.
+A [`docker-compose.yml`](./docker-compose.yml) file is provided for running the postgres database and media server services and optionally, the main application (uncomment it to enable).
+
+> If you are using docker compose, you can remove the custom targets for setting up the test DB.
 
 You can compose up and down the containers using the following commands:
 

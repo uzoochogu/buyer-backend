@@ -2,14 +2,14 @@
 #include <drogon/drogon.h>
 #include <drogon/drogon_test.h>
 
+#include <array>
 #include <filesystem>
 #include <iostream>
-
 
 // Helper function to find the test_config.json file
 std::string find_config_file() {
   // Try different relative paths from the executable location
-  std::vector<std::string> possible_paths = {
+  const std::array<std::string, 6> possible_paths = {
       "test_config.json",           // Same directory
       "../test_config.json",        // One level up
       "../../test_config.json",     // Two levels up
@@ -34,8 +34,6 @@ std::string find_config_file() {
 }
 
 int main(int argc, char** argv) {
-  using namespace drogon;
-
   //  Note that "../../../test_config.json" is relative to the executable in
   //  MSVC
 
@@ -44,7 +42,7 @@ int main(int argc, char** argv) {
   std::cout << "Loading configuration from: " << config_path << std::endl;
 
   try {
-    app().loadConfigFile(config_path);
+    drogon::app().loadConfigFile(config_path);
   } catch (const std::exception& e) {
     std::cerr << "Error loading config file: " << e.what() << std::endl;
     std::cerr << "Working directory: " << std::filesystem::current_path()
@@ -58,18 +56,18 @@ int main(int argc, char** argv) {
   // Start the main loop on another thread
   std::thread thr([&]() {
     // Queues the promise to be fulfilled after starting the loop
-    app().getLoop()->queueInLoop([&p1]() { p1.set_value(); });
-    app().run();
+    drogon::app().getLoop()->queueInLoop([&p1]() { p1.set_value(); });
+    drogon::app().run();
   });
 
   // The future is only satisfied after the event loop started
   f1.get();
-  int status = test::run(argc, argv);
+  const int status = drogon::test::run(argc, argv);
   std::this_thread::sleep_for(std::chrono::milliseconds(
       1500));  // prevents seg faults in release builds.
 
   // Ask the event loop to shutdown and wait
-  app().getLoop()->queueInLoop([]() { app().quit(); });
+  drogon::app().getLoop()->queueInLoop([]() { drogon::app().quit(); });
   thr.join();
   return status;
 }

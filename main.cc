@@ -1,10 +1,10 @@
 #include <drogon/drogon.h>
 
+#include <array>
 #include <filesystem>
 #include <format>
 #include <iostream>
 #include <string>
-#include <vector>
 
 #include "services/service_manager.hpp"
 
@@ -20,7 +20,7 @@ void print_help() {
 
 std::string find_config_file(const std::string& filename) {
   // Search up to 3 parent directories up.
-  std::vector<std::string> possible_paths = {
+  const std::array<std::string, 4> possible_paths = {
       filename, "../" + filename, "../../" + filename, "../../../" + filename};
 
   for (const auto& path : possible_paths) {
@@ -39,7 +39,7 @@ std::string find_config_file(const std::string& filename) {
 
 int main(int argc, char* argv[]) {
   bool test_mode = false;
-  std::string config = "";
+  std::string config;
 
   // Parse command line arguments
   for (int i = 1; i < argc; i++) {
@@ -113,9 +113,9 @@ int main(int argc, char* argv[]) {
       if (!bucket_created) {
         LOG_ERROR << "Failed to create or verify 'media' bucket";
         exit(1);
-      } else {
-        LOG_INFO << "Media bucket is ready";
       }
+      LOG_INFO << "Media bucket is ready";
+      co_return;
     }());
   });
 

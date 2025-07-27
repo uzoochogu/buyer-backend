@@ -83,8 +83,6 @@ drogon::Task<bool> S3Service::process_media(const std::string &bucket_name,
     co_return false;
   }
 
-  auto &metadata = outcome.GetResult().GetMetadata();
-
   LOG_INFO << "Successfully retrieved object, size: "
            << outcome.GetResult().GetContentLength() << " bytes";
 
@@ -99,6 +97,8 @@ drogon::Task<bool> S3Service::process_media(const std::string &bucket_name,
    * - Virus scanning
    * - Format validation
    */
+  // auto &metadata = outcome.GetResult().GetMetadata();
+
   if (content_type.find("image/") != std::string::npos) {
     //  or specific formats e.g. content_type.ends_with(".png") ||
     //  content_type.ends_with(".jpg")
