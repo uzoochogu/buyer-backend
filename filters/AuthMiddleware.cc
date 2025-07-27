@@ -1,13 +1,14 @@
 #include <drogon/HttpMiddleware.h>
+#ifndef JWT_DISABLE_PICOJSON
 #define JWT_DISABLE_PICOJSON
+#endif
 #include <jwt-cpp/jwt.h>
-#include <jwt-cpp/traits/nlohmann-json/traits.h>
+#include <jwt-cpp/traits/open-source-parsers-jsoncpp/traits.h>
 
 #include <string>
 
 #include "../config/config.hpp"
 
-using traits = jwt::traits::nlohmann_json;
 using namespace drogon;
 
 class AuthMiddleware : public HttpMiddleware<AuthMiddleware> {
@@ -38,6 +39,7 @@ class AuthMiddleware : public HttpMiddleware<AuthMiddleware> {
       // Extract the token
       std::string token = auth_header.substr(7);
 
+      using traits = jwt::traits::open_source_parsers_jsoncpp;
       // Verify the token
       auto decoded = jwt::decode<traits>(token);
 

@@ -12,13 +12,17 @@
 #include <drogon/orm/ResultIterator.h>
 #include <drogon/orm/Row.h>
 #include <drogon/orm/SqlBinder.h>
+
+#ifndef JWT_DISABLE_PICOJSON
 #define JWT_DISABLE_PICOJSON
+#endif
 #include <jwt-cpp/jwt.h>
-#include <jwt-cpp/traits/nlohmann-json/traits.h>
+#include <jwt-cpp/traits/open-source-parsers-jsoncpp/traits.h>
 
 #include <chrono>
 #include <iomanip>
 #include <random>
+#include <span>
 #include <sstream>
 
 #include "../config/config.hpp"
@@ -30,7 +34,6 @@ using namespace drogon;
 using namespace drogon::orm;
 
 using namespace api::v1;
-using traits = jwt::traits::nlohmann_json;
 
 // Helper function to generate a random string for tokens
 std::string generate_random_string(size_t length) {
@@ -49,10 +52,10 @@ std::string generate_random_string(size_t length) {
 }
 
 // Helper function for base64 encoding
-std::string base64_encode(const uint8_t* data, size_t length) {
+std::string base64_encode(std::span<const uint8_t> data) {
   static const char* encoding_table =
       "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
-
+  size_t length = data.size();
   std::string encoded;
   encoded.reserve(4 * ((length + 2) / 3));
 
@@ -88,6 +91,8 @@ std::string generate_jwt(int user_id, const std::string& username) {
   // Current time and expiration time (1 hour from now)
   auto now = std::chrono::system_clock::now();
   auto exp = now + std::chrono::hours(1);
+
+  using traits = jwt::traits::open_source_parsers_jsoncpp;
 
   // Create JWT token
   auto token =
@@ -175,7 +180,6 @@ Task<> Authentication::login(
     if (result.size() > 0) {
       const auto& row = result[0];
       int user_id = row["id"].as<int>();
-      std::string username = row["username"].as<std::string>();
       std::string stored_hash = row["password_hash"].as<std::string>();
 
       // Verify password using Argon2

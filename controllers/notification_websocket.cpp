@@ -11,25 +11,25 @@ void NotificationWebSocket::handleNewMessage(
     const WebSocketMessageType& type) {
   auto connId = wsConnPtr->getContext<std::string>();
 
-  // do nothing for now
-  // Sample code:
-  //   if (message.starts_with("subscribe:")) {
-  //     auto topic = message.substr(10);
-  //     ServiceManager::get_instance().get_connection_manager().subscribe(topic,
-  //                                                                       *connId);
-  //     wsConnPtr->send("Subscribed to " + topic);
-  //   } else if (message.starts_with("publish:")) {
-  //     auto payload = message.substr(8);
-  //     // Assume format: topic:message
-  //     auto delim = payload.find(':');
-  //     if (delim != std::string::npos) {
-  //       auto topic = payload.substr(0, delim);
-  //       auto content = payload.substr(delim + 1);
-  //       // publisher->publish(topic, content);
-  //       ServiceManager::get_instance().get_publisher().publish(topic,
-  //       content);
-  //     }
-  //   }
+  switch (type) {
+    case WebSocketMessageType::Text:
+      if (message.empty()) {
+        LOG_WARN << "Received empty message from user " << *connId;
+      }
+      break;
+    case WebSocketMessageType::Binary:
+      break;
+    case WebSocketMessageType::Ping:
+      wsConnPtr->send("Pong");
+      break;
+    case WebSocketMessageType::Pong:
+      break;
+    case WebSocketMessageType::Close:
+      wsConnPtr->forceClose();
+      return;
+    default:
+      LOG_WARN << "Received unknown message type";
+  }
 }
 
 void NotificationWebSocket::handleNewConnection(

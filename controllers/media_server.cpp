@@ -38,7 +38,7 @@ drogon::Task<> MediaController::get_upload_url(
     }
 
     auto file_name = json->get("filename", "nofile").asString();
-    auto is_proof = json->get("is_proof", false).asBool();
+    // auto is_proof = json->get("is_proof", false).asBool(); // not used yet
     auto content_type =
         json->get("content_type", "application/octet-stream").asString();
 

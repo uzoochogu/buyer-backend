@@ -603,7 +603,6 @@ Task<> Community::update_post(
     bool has_location = json->isMember("location");
     bool has_price_range = json->isMember("price_range");
     bool has_tags = json->isMember("tags") && (*json)["tags"].isArray();
-    bool has_media = media_array.size() > 0;
 
     if (!has_content && !has_request_status && !has_location &&
         !has_price_range && !has_tags) {
