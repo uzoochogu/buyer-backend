@@ -16,21 +16,14 @@ RUN git clone https://github.com/Microsoft/vcpkg.git /opt/vcpkg \
 ENV VCPKG_ROOT=/opt/vcpkg
 ENV PATH="${VCPKG_ROOT}:${PATH}"
 
-# Install dependencies via vcpkg
-RUN vcpkg install \
-    jwt-cpp \
-    argon2[hwopt,tool] \
-    cppzmq \
-    redis-plus-plus[async,tls,cxx17] \
-    boost-uuid \
-    mlpack \
-    aws-sdk-cpp[s3]
-
 # Set working directory
 WORKDIR /app
 
 # Copy source code
 COPY . .
+
+# Install dependencies via vcpkg
+RUN vcpkg install
 
 # Configure and build
 RUN cmake -B ./build -S . \
