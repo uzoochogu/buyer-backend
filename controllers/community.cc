@@ -23,10 +23,18 @@
 #include "../utilities/time_manipulation.hpp"
 #include "scenario_specific_utils.hpp"
 
-using namespace drogon;
-using namespace drogon::orm;
+using drogon::app;
+using drogon::HttpRequestPtr;
+using drogon::HttpResponse;
+using drogon::HttpResponsePtr;
+using drogon::k400BadRequest;
+using drogon::k403Forbidden;
+using drogon::k404NotFound;
+using drogon::k500InternalServerError;
+using drogon::Task;
+using drogon::orm::DrogonDbException;
 
-using namespace api::v1;
+using api::v1::Community;
 
 // Helper function to convert string array to JSON array
 Json::Value string_array_to_json(const std::string& array_str) {
@@ -206,7 +214,7 @@ Task<> Community::create_post(
         std::stoi(user_id), content, tags_str, location, is_product_request,
         request_status, price_range);
 
-    if (result.size() < 1) {
+    if (result.empty()) {
       throw std::runtime_error("Initial post insert failed");
     }
     int post_id = result[0]["id"].as<int>();
@@ -334,12 +342,13 @@ Task<> Community::get_post_by_id(
         "WHERE p.id = $1",
         post_id, current_user_id);
 
-    if (result.size() < 1) {
+    if (result.empty()) {
       Json::Value error;
       error["error"] = "Post not found";
       auto resp = HttpResponse::newHttpJsonResponse(error);
       resp->setStatusCode(k404NotFound);
       callback(resp);
+      co_return;
     }
 
     const auto& row = result[0];
@@ -394,7 +403,7 @@ Task<> Community::get_post_by_id(
 //   auto result = co_await db->execSqlCoro(
 //       "SELECT user_id FROM posts WHERE id = $1", std::stoi(id));
 
-//   if (result.size() == 0) {
+//   if (result.empty()) {
 //     Json::Value error;
 //     error["error"] = "Post not found";
 //     auto resp = HttpResponse::newHttpJsonResponse(error);
@@ -418,7 +427,7 @@ Task<> Community::get_post_by_id(
 //       "SELECT content, request_status, location, price_range, tags FROM posts
 //       WHERE id = $1", std::stoi(id));
 
-//   if (currentPost.size() == 0) {
+//   if (currentPost.empty()) {
 //     Json::Value error;
 //     error["error"] = "Post not found";
 //     auto resp = HttpResponse::newHttpJsonResponse(error);
@@ -502,7 +511,7 @@ Task<> Community::get_post_by_id(
 //       price_range,
 //       tags_str);
 
-//   if (updateResult.size() > 0) {
+//   if (!updateResult.empty()) {
 //     Json::Value ret;
 //     ret["status"] = "success";
 //     ret["message"] = "Post updated successfully";
@@ -578,7 +587,7 @@ Task<> Community::update_post(
     auto check_result = co_await db->execSqlCoro(
         "SELECT user_id FROM posts WHERE id = $1", std::stoi(id));
 
-    if (check_result.size() < 1) {
+    if (check_result.empty()) {
       Json::Value error;
       error["error"] = "Post not found";
       auto resp = HttpResponse::newHttpJsonResponse(error);
@@ -671,7 +680,7 @@ Task<> Community::update_post(
           tags_str          // $9: tags value
       );
 
-      if (update_result.size() < 1) {
+      if (update_result.empty()) {
         throw std::runtime_error("Initial post update failed");
       }
 
@@ -704,7 +713,7 @@ Task<> Community::update_post(
       post_data_json["type"] = "post_updated";
       post_data_json["id"] = id;
       post_data_json["message"] = "New update on post";
-      post_data_json["modified_at"] = get_current_utc_timestamp();
+      post_data_json["modified_at"] = get_precise_sql_utc_timestamp();
 
       Json::FastWriter writer;
       std::string post_data = writer.write(post_data_json);
@@ -914,7 +923,7 @@ Task<> Community::subscribe_to_post(
     store_user_subscription(current_user_id, post_topic);
 
     Json::Value ret;
-    if (result.size() > 0) {
+    if (!result.empty()) {
       ret["status"] = "success";
       ret["message"] = "Subscribed to post";
     } else {
@@ -957,7 +966,7 @@ Task<> Community::unsubscribe_from_post(
     remove_user_subscription(current_user_id, post_topic);
 
     Json::Value ret;
-    if (result.size() > 0) {
+    if (!result.empty()) {
       ret["status"] = "success";
       ret["message"] = "Unsubscribed from post";
     } else {

@@ -18,10 +18,20 @@
 #include "../utilities/conversion.hpp"
 #include "scenario_specific_utils.hpp"
 
-using namespace drogon;
-using namespace drogon::orm;
+using drogon::app;
+using drogon::HttpRequestPtr;
+using drogon::HttpResponse;
+using drogon::HttpResponsePtr;
+using drogon::k400BadRequest;
+using drogon::k401Unauthorized;
+using drogon::k403Forbidden;
+using drogon::k404NotFound;
+using drogon::k409Conflict;
+using drogon::k500InternalServerError;
+using drogon::Task;
+using drogon::orm::DrogonDbException;
 
-using namespace api::v1;
+using api::v1::Chats;
 
 Task<> Chats::get_conversations(
     HttpRequestPtr req, std::function<void(const HttpResponsePtr&)> callback) {
@@ -112,7 +122,7 @@ Task<> Chats::create_conversation(
         "LIMIT 1",
         std::stoi(user_id), other_user_id);
 
-    if (result.size() > 0) {
+    if (!result.empty()) {
       // Conversation already exists
       Json::Value ret;
       ret["status"] = "success";
@@ -120,6 +130,7 @@ Task<> Chats::create_conversation(
       ret["message"] = "Conversation already exists";
       auto resp = HttpResponse::newHttpJsonResponse(ret);
       callback(resp);
+      co_return;
     } else {
       // Create new conversation
       auto insert_result = co_await db->execSqlCoro(
@@ -127,63 +138,60 @@ Task<> Chats::create_conversation(
           "created_at",
           name);
 
-      if (insert_result.size() > 0) {
-        int conversation_id = insert_result[0]["id"].as<int>();
-        std::string conversation_id_str =
-            insert_result[0]["id"].as<std::string>();
-
-        // Add participants
-        try {
-          co_await db->execSqlCoro(
-              "INSERT INTO conversation_participants (conversation_id, "
-              "user_id) VALUES ($1, $2), ($1, $3)",
-              conversation_id, std::stoi(user_id), other_user_id);
-
-          // notification
-          std::string conversation_topic =
-              create_topic("chat", conversation_id_str);
-          std::string other_user_id_str = std::to_string(other_user_id);
-          ServiceManager::get_instance().get_subscriber().subscribe(
-              conversation_topic);
-          ServiceManager::get_instance().get_connection_manager().subscribe(
-              conversation_topic, user_id);
-          ServiceManager::get_instance().get_connection_manager().subscribe(
-              conversation_topic, other_user_id_str);
-          store_user_subscription(user_id, conversation_topic);
-          store_user_subscription(other_user_id_str, conversation_topic);
-          LOG_INFO << "User " << user_id << " and " << other_user_id_str
-                   << " subscribed to conversation topic: "
-                   << conversation_topic;
-
-          Json::Value data_json;
-          data_json["type"] = "chat_created";
-          data_json["id"] = conversation_id_str;
-          data_json["message"] = "New Conversation created";
-          data_json["modified_at"] =
-              insert_result[0]["created_at"].as<std::string>();
-
-          Json::FastWriter writer;
-          std::string data = writer.write(data_json);
-          ServiceManager::get_instance().get_publisher().publish(
-              conversation_topic, data);
-
-          Json::Value ret;
-          ret["status"] = "success";
-          ret["conversation_id"] = conversation_id;
-          auto resp = HttpResponse::newHttpJsonResponse(ret);
-          callback(resp);
-        } catch (const DrogonDbException& e) {
-          LOG_ERROR << "Database error adding participants: "
-                    << e.base().what();
-          Json::Value error;
-          error["error"] = "Database error";
-          auto resp = HttpResponse::newHttpJsonResponse(error);
-          resp->setStatusCode(k500InternalServerError);
-          callback(resp);
-        }
-      } else {
+      if (insert_result.empty()) {
         Json::Value error;
         error["error"] = "Failed to create conversation";
+        auto resp = HttpResponse::newHttpJsonResponse(error);
+        resp->setStatusCode(k500InternalServerError);
+        callback(resp);
+      }
+      int conversation_id = insert_result[0]["id"].as<int>();
+      std::string conversation_id_str =
+          insert_result[0]["id"].as<std::string>();
+
+      // Add participants
+      try {
+        co_await db->execSqlCoro(
+            "INSERT INTO conversation_participants (conversation_id, "
+            "user_id) VALUES ($1, $2), ($1, $3)",
+            conversation_id, std::stoi(user_id), other_user_id);
+
+        // notification
+        std::string conversation_topic =
+            create_topic("chat", conversation_id_str);
+        std::string other_user_id_str = std::to_string(other_user_id);
+        ServiceManager::get_instance().get_subscriber().subscribe(
+            conversation_topic);
+        ServiceManager::get_instance().get_connection_manager().subscribe(
+            conversation_topic, user_id);
+        ServiceManager::get_instance().get_connection_manager().subscribe(
+            conversation_topic, other_user_id_str);
+        store_user_subscription(user_id, conversation_topic);
+        store_user_subscription(other_user_id_str, conversation_topic);
+        LOG_INFO << "User " << user_id << " and " << other_user_id_str
+                 << " subscribed to conversation topic: " << conversation_topic;
+
+        Json::Value data_json;
+        data_json["type"] = "chat_created";
+        data_json["id"] = conversation_id_str;
+        data_json["message"] = "New Conversation created";
+        data_json["modified_at"] =
+            insert_result[0]["created_at"].as<std::string>();
+
+        Json::FastWriter writer;
+        std::string data = writer.write(data_json);
+        ServiceManager::get_instance().get_publisher().publish(
+            conversation_topic, data);
+
+        Json::Value ret;
+        ret["status"] = "success";
+        ret["conversation_id"] = conversation_id;
+        auto resp = HttpResponse::newHttpJsonResponse(ret);
+        callback(resp);
+      } catch (const DrogonDbException& e) {
+        LOG_ERROR << "Database error adding participants: " << e.base().what();
+        Json::Value error;
+        error["error"] = "Database error";
         auto resp = HttpResponse::newHttpJsonResponse(error);
         resp->setStatusCode(k500InternalServerError);
         callback(resp);
@@ -228,7 +236,7 @@ Task<> Chats::get_messages(HttpRequestPtr req,
         "user_id = $2",
         std::stoi(conversation_id), std::stoi(user_id));
 
-    if (result.size() < 1) {
+    if (result.empty()) {
       Json::Value error;
       error["error"] = "Unauthorized access to conversation";
       auto resp = HttpResponse::newHttpJsonResponse(error);
@@ -337,7 +345,7 @@ Task<> Chats::send_message(HttpRequestPtr req,
   }
 
   std::string message_type = "text";
-  if (media_array.size() > 0) {
+  if (!media_array.empty()) {
     message_type = content.empty() ? "media" : "mixed";
   }
 
@@ -352,7 +360,7 @@ Task<> Chats::send_message(HttpRequestPtr req,
         "user_id = $2",
         std::stoi(conversation_id), current_user_id);
 
-    if (result.size() == 0) {
+    if (result.empty()) {
       // User is not a participant
       Json::Value error;
       error["error"] = "Unauthorized access to conversation";
@@ -370,7 +378,7 @@ Task<> Chats::send_message(HttpRequestPtr req,
           "VALUES ($1, $2, $3, $4) RETURNING id, created_at",
           std::stoi(conversation_id), current_user_id, content, message_type);
 
-      if (insert_result.size() < 1) {
+      if (insert_result.empty()) {
         throw std::runtime_error("Initial message insert failed");
       }
 
@@ -412,7 +420,7 @@ Task<> Chats::send_message(HttpRequestPtr req,
                                       : content;
       chat_data_json["modified_at"] = created_at;
 
-      if (processed_media.size() > 0) {
+      if (!processed_media.empty()) {
         chat_data_json["media"] = processed_media;
       }
 
@@ -426,7 +434,7 @@ Task<> Chats::send_message(HttpRequestPtr req,
       ret["message_id"] = message_id;
       ret["created_at"] = created_at;
       ret["message_type"] = message_type;
-      if (processed_media.size() > 0) {
+      if (!processed_media.empty()) {
         ret["media"] = processed_media;
       }
       auto resp = HttpResponse::newHttpJsonResponse(ret);
@@ -484,7 +492,7 @@ Task<> Chats::get_conversation_by_offer(
         "WHERE o.id = $1",
         std::stoi(offer_id));
 
-    if (result.size() == 0) {
+    if (result.empty()) {
       Json::Value error;
       error["error"] = "Offer not found";
       auto resp = HttpResponse::newHttpJsonResponse(error);
@@ -518,13 +526,13 @@ Task<> Chats::get_conversation_by_offer(
         (std::stoi(current_user_id) == offer_user_id ? post_user_id
                                                      : offer_user_id));
 
-    if (conv_result.size() == 0) {
+    if (conv_result.empty()) {
       // No conversation exists yet, create one
       auto new_conv_result = co_await db->execSqlCoro(
           "INSERT INTO conversations (name) VALUES ($1) RETURNING id",
           "Offer #" + offer_id + " Conversation");
 
-      if (new_conv_result.size() == 0) {
+      if (new_conv_result.empty()) {
         Json::Value error;
         error["error"] = "Failed to create conversation";
         auto resp = HttpResponse::newHttpJsonResponse(error);
@@ -597,7 +605,7 @@ Task<> Chats::mark_messages_as_read(
         "user_id = $2",
         std::stoi(conversation_id), std::stoi(user_id));
 
-    if (result.size() == 0) {
+    if (result.empty()) {
       // User is not a participant
       Json::Value error;
       error["error"] = "Unauthorized access to conversation";
