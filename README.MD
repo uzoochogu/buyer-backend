@@ -8,7 +8,7 @@ It demonstrates the following:
 * Password hashing with Argon.
 * Database queries with coroutines.
 * Pub/Sub system for notifications using ZeroMQ.
-* Clustering of geographic coordinates using mlpack.
+* Clustering of geographic coordinates using `postgis` Postgres extension.
 * Media management with S3 compatible Minio Object Store and presigned links.
 * Integration tests.
 
@@ -37,8 +37,6 @@ Below are some of the dependencies that are used in the project:
 - [cppzmq](https://github.com/zeromq/cppzmq) - Pub/Sub, Notification system.
 - ~~[redis-plus-plus](https://github.com/sewenew/redis-plus-plus)~~ - Not currently used or but code stub is present.
 - [boost-uuid](https://www.boost.org/libs/uuid) - Faster UUID than Drogon UUID utility.
-- [mlpack](https://github.com/mlpack/mlpack) - GPS coordinates clustering. Includes armadillo.
-- [armdillo](https://arma.sourceforge.net/) - Installed along side mlpack.
 - [aws-sdk-cpp](https://github.com/aws/aws-sdk-cpp) - Only using S3 component for S3 compatible Minio Service.
 
 Installing using vcpkg:
@@ -60,7 +58,6 @@ vcpkg install
 ./vcpkg install cppzmq:triplet_name
 ./vcpkg install redis-plus-plus[async,tls,cxx17]:triplet_name  # currently not used, so can be ignored.
 ./vcpkg install boost-uuid:triplet_name
-./vcpkg install mlpack:triplet_name # installs armadillo
 ./vcpkg install aws-sdk-cpp[s3]:triplet_name
 ```
 
@@ -160,17 +157,22 @@ cmake --build build --config Debug --target buyer_backend_test
 # Run main application
 ./buyer-backend --test-mode
 
-# Then run test
+# Method 1: Run tests either using ctest...(Slower provides more info)
 # From ~/buyer-backend/build/test
 ctest -C Release
 # or
 ctest -C Debug
 # Note that -V flag gives verbose output
 
+# This runs a specific ctest
+ctest -C Release -R ChatsTest
 
 
-# or navigate to the test executable and run it directly
+# Method 2: run test executable directly (Runs faster)
 ./buyer_backend_test
+
+# This runs a specific test through the test executable
+./buyer_backend_test -r ChatsTest
 ```
 
 ### Notes for Integration testing

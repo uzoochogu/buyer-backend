@@ -12,13 +12,17 @@
 #include <drogon/orm/Row.h>
 #include <drogon/orm/SqlBinder.h>
 
-using namespace drogon;
-using namespace drogon::orm;
+using drogon::app;
+using drogon::HttpResponse;
+using drogon::HttpResponsePtr;
+using drogon::orm::DrogonDbException;
+using drogon::orm::Transaction;
 
-using namespace api::v1;
+using api::v1::Search;
 
-Task<> Search::search(HttpRequestPtr req,
-                      std::function<void(const HttpResponsePtr&)> callback) {
+drogon::Task<> Search::search(
+    drogon::HttpRequestPtr req,
+    std::function<void(const drogon::HttpResponsePtr&)> callback) {
   auto query = req->getParameter("query");
 
   LOG_DEBUG << "Search query received: '" << query << "'";

@@ -1,23 +1,16 @@
 #include <drogon/HttpClient.h>
-#include <drogon/drogon.h>
 #include <drogon/drogon_test.h>
 #include <drogon/utils/Utilities.h>
 
 #include <string>
 
+#include "helpers.hpp"
+
+
 DROGON_TEST(DashboardTest) {
-  // Setup test database connection
   auto db_client = drogon::app().getDbClient();
 
-  // Clean up any test data from previous runs
-  REQUIRE_NOTHROW(db_client->execSqlSync(
-      "DELETE FROM orders WHERE user_id IN (SELECT id FROM users WHERE "
-      "username = 'testdash')"));
-  REQUIRE_NOTHROW(db_client->execSqlSync(
-      "DELETE FROM user_sessions WHERE user_id IN (SELECT id FROM users WHERE "
-      "username = 'testdash')"));
-  REQUIRE_NOTHROW(
-      db_client->execSqlSync("DELETE FROM users WHERE username = 'testdash'"));
+  helpers::cleanup_db();
 
   // Create test user for testing
   auto client = drogon::HttpClient::newHttpClient("http://127.0.0.1:5555");
@@ -46,7 +39,25 @@ DROGON_TEST(DashboardTest) {
   CHECK(user_result.size() > 0);
   int user_id = user_result[0]["id"].as<int>();
 
-  // Test 1: Get dashboard data
+  // Test 1: Create a new order and verify dashboard updates
+  // Create an order
+  Json::Value create_order_json;
+  create_order_json["user_id"] = user_id;
+  create_order_json["status"] = "pending";
+
+  auto create_order_req =
+      drogon::HttpRequest::newHttpJsonRequest(create_order_json);
+  create_order_req->setMethod(drogon::Post);
+  create_order_req->setPath("/api/v1/orders");
+  create_order_req->addHeader("Authorization", "Bearer " + token);
+
+  auto create_order_resp = client->sendRequest(create_order_req);
+  CHECK(create_order_resp.second->getStatusCode() == drogon::k200OK);
+
+  auto create_order_resp_json = create_order_resp.second->getJsonObject();
+  int order_id = (*create_order_resp_json)["order_id"].asInt();
+
+  // Test 2: Get dashboard data
   auto get_dashboard_req = drogon::HttpRequest::newHttpRequest();
   get_dashboard_req->setMethod(drogon::Get);
   get_dashboard_req->setPath("/api/v1/dashboard");
@@ -72,24 +83,6 @@ DROGON_TEST(DashboardTest) {
     has_status_counts = true;
   }
   CHECK(has_status_counts);
-
-  // Test 2: Create a new order and verify dashboard updates
-  // Create an order
-  Json::Value create_order_json;
-  create_order_json["user_id"] = user_id;
-  create_order_json["status"] = "pending";
-
-  auto create_order_req =
-      drogon::HttpRequest::newHttpJsonRequest(create_order_json);
-  create_order_req->setMethod(drogon::Post);
-  create_order_req->setPath("/api/v1/orders");
-  create_order_req->addHeader("Authorization", "Bearer " + token);
-
-  auto create_order_resp = client->sendRequest(create_order_req);
-  CHECK(create_order_resp.second->getStatusCode() == drogon::k200OK);
-
-  auto create_order_resp_json = create_order_resp.second->getJsonObject();
-  int order_id = (*create_order_resp_json)["order_id"].asInt();
 
   // Get updated dashboard data
   auto get_updated_dashboard_req = drogon::HttpRequest::newHttpRequest();
@@ -148,11 +141,5 @@ DROGON_TEST(DashboardTest) {
     CHECK(updated_orders_data2["in_progress"].asInt() >= 1);
   }
 
-  // Clean up test data
-  REQUIRE_NOTHROW(db_client->execSqlSync(
-      "DELETE FROM orders WHERE id IN ($1, $2)", order_id, order_id2));
-  REQUIRE_NOTHROW(db_client->execSqlSync(
-      "DELETE FROM user_sessions WHERE user_id = $1", user_id));
-  REQUIRE_NOTHROW(
-      db_client->execSqlSync("DELETE FROM users WHERE username = 'testdash'"));
+  helpers::cleanup_db();
 }

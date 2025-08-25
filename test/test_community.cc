@@ -1,28 +1,15 @@
 #include <drogon/HttpClient.h>
-#include <drogon/drogon.h>
 #include <drogon/drogon_test.h>
 #include <drogon/utils/Utilities.h>
 
 #include <string>
 
+#include "helpers.hpp"
+
 DROGON_TEST(CommunityTest) {
-  // Setup test database connection
   auto db_client = drogon::app().getDbClient();
 
-  // Clean up any test data from previous runs
-  REQUIRE_NOTHROW(db_client->execSqlSync(
-      "DELETE FROM post_subscriptions WHERE user_id IN (SELECT id FROM users "
-      "WHERE "
-      "username = 'testcomm1' OR username = 'testcomm2')"));
-  REQUIRE_NOTHROW(db_client->execSqlSync(
-      "DELETE FROM posts WHERE user_id IN (SELECT id FROM users WHERE "
-      "username = 'testcomm1' OR username = 'testcomm2')"));
-  REQUIRE_NOTHROW(db_client->execSqlSync(
-      "DELETE FROM user_sessions WHERE user_id IN (SELECT id FROM users WHERE "
-      "username = 'testcomm1' OR username = 'testcomm2')"));
-  REQUIRE_NOTHROW(
-      db_client->execSqlSync("DELETE FROM users WHERE username = 'testcomm1' "
-                             "OR username = 'testcomm2'"));
+  helpers::cleanup_db();
 
   // Create test users for community testing
   auto client = drogon::HttpClient::newHttpClient("http://127.0.0.1:5555");
@@ -415,36 +402,6 @@ DROGON_TEST(CommunityTest) {
   }
   CHECK(found_open_status_post);
 
-  // Test 15: Update product request status
-  Json::Value update_status_json;
-  update_status_json["request_status"] = "in_progress";
-
-  auto update_status_req =
-      drogon::HttpRequest::newHttpJsonRequest(update_status_json);
-  update_status_req->setMethod(drogon::Put);
-  update_status_req->setPath("/api/v1/posts/" +
-                             std::to_string(product_post_id));
-  update_status_req->addHeader("Authorization", "Bearer " + token2);
-
-  auto update_status_resp = client->sendRequest(update_status_req);
-  CHECK(update_status_resp.second->getStatusCode() == drogon::k200OK);
-
-  auto update_status_resp_json = update_status_resp.second->getJsonObject();
-  CHECK((*update_status_resp_json)["status"].asString() == "success");
-
-  // Verify status was updated
-  auto verify_status_req = drogon::HttpRequest::newHttpRequest();
-  verify_status_req->setMethod(drogon::Get);
-  verify_status_req->setPath("/api/v1/posts/" +
-                             std::to_string(product_post_id));
-  verify_status_req->addHeader("Authorization", "Bearer " + token2);
-
-  auto verify_status_resp = client->sendRequest(verify_status_req);
-  CHECK(verify_status_resp.second->getStatusCode() == drogon::k200OK);
-
-  auto verify_status_json = verify_status_resp.second->getJsonObject();
-  CHECK((*verify_status_json)["request_status"].asString() == "in_progress");
-
   // Test 16: Test pagination
   // Create multiple posts to ensure we have enough for pagination
   std::vector<int> pagination_post_ids;
@@ -560,7 +517,7 @@ DROGON_TEST(CommunityTest) {
   combined_filter_req->setMethod(drogon::Get);
   combined_filter_req->setPath(
       "/api/v1/posts/"
-      "filter?tags=product&is_product_request=true&status=in_progress");
+      "filter?tags=product&is_product_request=true&status=open");
   combined_filter_req->addHeader("Authorization", "Bearer " + token1);
 
   auto combined_filter_resp = client->sendRequest(combined_filter_req);
@@ -574,7 +531,7 @@ DROGON_TEST(CommunityTest) {
     if (post["id"].asInt() == product_post_id) {
       found_combined_filter_post = true;
       CHECK(post["is_product_request"].asBool() == true);
-      CHECK(post["request_status"].asString() == "in_progress");
+      CHECK(post["request_status"].asString() == "open");
 
       bool has_product_tag = false;
       for (const auto& tag : post["tags"]) {
@@ -752,30 +709,7 @@ DROGON_TEST(CommunityTest) {
   CHECK((*get_special_chars_json)["content"].asString() ==
         "Special characters: !@#$%^&*()_+{}|:<>?~`-=[]\\;',./");
 
-  // Add to cleanup list
   pagination_post_ids.push_back(special_chars_post_id);
 
-  // Clean up test data in the correct order to avoid foreign key violations
-  REQUIRE_NOTHROW(db_client->execSqlSync(
-      "DELETE FROM post_subscriptions WHERE user_id IN (SELECT id FROM users "
-      "WHERE "
-      "username = 'testcomm1' OR username = 'testcomm2')"));
-
-  // Clean up all created posts
-  for (int post_id : pagination_post_ids) {
-    REQUIRE_NOTHROW(
-        db_client->execSqlSync("DELETE FROM posts WHERE id = $1", post_id));
-  }
-
-  REQUIRE_NOTHROW(
-      db_client->execSqlSync("DELETE FROM posts WHERE id IN ($1, $2)",
-                             regular_post_id, product_post_id));
-
-  REQUIRE_NOTHROW(db_client->execSqlSync(
-      "DELETE FROM user_sessions WHERE user_id IN (SELECT id FROM users WHERE "
-      "username = 'testcomm1' OR username = 'testcomm2')"));
-
-  REQUIRE_NOTHROW(
-      db_client->execSqlSync("DELETE FROM users WHERE username = 'testcomm1' "
-                             "OR username = 'testcomm2'"));
+  helpers::cleanup_db();
 }

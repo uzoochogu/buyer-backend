@@ -19,9 +19,18 @@
 #include "../services/service_manager.hpp"
 #include "offers.hpp"
 
-using namespace drogon;
-using namespace drogon::orm;
-using namespace api::v1;
+using drogon::app;
+using drogon::HttpResponse;
+using drogon::HttpResponsePtr;
+using drogon::k400BadRequest;
+using drogon::k403Forbidden;
+using drogon::k404NotFound;
+using drogon::k500InternalServerError;
+using drogon::Task;
+using drogon::orm::DrogonDbException;
+using drogon::orm::Transaction;
+
+using api::v1::Offers;
 
 // Helper function to create a conversation between two users
 Task<std::string> create_or_get_conversation(std::string user1_id,
@@ -39,7 +48,7 @@ Task<std::string> create_or_get_conversation(std::string user1_id,
         "LIMIT 1",
         std::stoi(user1_id), std::stoi(user2_id));
 
-    if (result.size() > 0) {
+    if (!result.empty()) {
       // conversation already exists
       co_return std::to_string(result[0]["id"].as<int>());
     }
@@ -49,7 +58,7 @@ Task<std::string> create_or_get_conversation(std::string user1_id,
         "INSERT INTO conversations (name) VALUES ($1) RETURNING id",
         "Offer #" + offer_id + " Negotiation");
 
-    if (conv_result.size() == 0) {
+    if (conv_result.empty()) {
       co_return "";
     }
 
@@ -84,7 +93,7 @@ Task<std::string> create_or_get_conversation_transaction(
         "LIMIT 1",
         std::stoi(user1_id), std::stoi(user2_id));
 
-    if (result.size() > 0) {
+    if (!result.empty()) {
       co_return std::to_string(result[0]["id"].as<int>());
     }
 
@@ -94,7 +103,7 @@ Task<std::string> create_or_get_conversation_transaction(
         "INSERT INTO conversations (name) VALUES ($1) RETURNING id",
         "Offer #" + offer_id + " Negotiation");
 
-    if (conv_result.size() == 0) {
+    if (conv_result.empty()) {
       LOG_ERROR << "Failed to create new conversation";
       co_return "";
     }
@@ -144,7 +153,7 @@ void add_negotiation_message(
       "(conversation_id, sender_id, content, context_type, context_id, "
       "metadata) "
       "VALUES ($1, $2, $3, 'negotiation', $4, $5::jsonb)",
-      [=](const Result&) {
+      [=](const drogon::orm::Result&) {
         LOG_INFO << "Message added successfully, completing transaction";
 
         Json::Value response;
@@ -205,7 +214,7 @@ Task<> Offers::negotiate_offer(
           "WHERE o.id = $1",
           std::stoi(id));
 
-      if (result.size() == 0) {
+      if (result.empty()) {
         Json::Value error;
         error["error"] = "Offer not found";
         auto resp = HttpResponse::newHttpJsonResponse(error);
@@ -248,7 +257,7 @@ Task<> Offers::negotiate_offer(
           "RETURNING id, created_at",
           std::stoi(id), std::stoi(current_user_id), proposed_price, message);
 
-      if (neg_result.size() == 0) {
+      if (neg_result.empty()) {
         Json::Value error;
         error["error"] = "Failed to create negotiation";
         auto resp = HttpResponse::newHttpJsonResponse(error);
@@ -369,7 +378,7 @@ Task<> Offers::get_negotiations(
         "WHERE o.id = $1",
         std::stoi(id));
 
-    if (result.size() == 0) {
+    if (result.empty()) {
       Json::Value error;
       error["error"] = "Offer not found";
       auto resp = HttpResponse::newHttpJsonResponse(error);
@@ -467,7 +476,7 @@ Task<> Offers::request_proof(
         "WHERE o.id = $1",
         std::stoi(id));
 
-    if (result.size() == 0) {
+    if (result.empty()) {
       Json::Value error;
       error["error"] = "Offer not found";
       auto resp = HttpResponse::newHttpJsonResponse(error);
@@ -572,7 +581,7 @@ Task<> Offers::submit_proof(
         "WHERE o.id = $1",
         std::stoi(id));
 
-    if (result.size() == 0) {
+    if (result.empty()) {
       Json::Value error;
       error["error"] = "Offer not found";
       auto resp = HttpResponse::newHttpJsonResponse(error);
@@ -602,7 +611,7 @@ Task<> Offers::submit_proof(
         "RETURNING id",
         std::stoi(id), std::stoi(current_user_id), image_url, description);
 
-    if (proof_result.size() == 0) {
+    if (proof_result.empty()) {
       Json::Value error;
       error["error"] = "Failed to create proof";
       auto resp = HttpResponse::newHttpJsonResponse(error);
@@ -684,7 +693,7 @@ Task<> Offers::get_proofs(HttpRequestPtr req,
         "WHERE o.id = $1",
         std::stoi(id));
 
-    if (result.size() == 0) {
+    if (result.empty()) {
       Json::Value error;
       error["error"] = "Offer not found";
       auto resp = HttpResponse::newHttpJsonResponse(error);
@@ -767,7 +776,7 @@ Task<> Offers::approve_proof(
         "WHERE o.id = $1",
         std::stoi(id));
 
-    if (result.size() == 0) {
+    if (result.empty()) {
       Json::Value error;
       error["error"] = "Offer not found";
       auto resp = HttpResponse::newHttpJsonResponse(error);
@@ -795,7 +804,7 @@ Task<> Offers::approve_proof(
         "offer_id = $2 RETURNING id",
         std::stoi(proof_id), std::stoi(id));
 
-    if (update_result.size() == 0) {
+    if (update_result.empty()) {
       Json::Value error;
       error["error"] = "Proof not found";
       auto resp = HttpResponse::newHttpJsonResponse(error);
@@ -873,7 +882,7 @@ Task<> Offers::reject_proof(
         "WHERE o.id = $1",
         std::stoi(id));
 
-    if (result.size() == 0) {
+    if (result.empty()) {
       Json::Value error;
       error["error"] = "Offer not found";
       auto resp = HttpResponse::newHttpJsonResponse(error);
@@ -901,7 +910,7 @@ Task<> Offers::reject_proof(
         "offer_id = $2 RETURNING id",
         std::stoi(proof_id), std::stoi(id));
 
-    if (update_result.size() == 0) {
+    if (update_result.empty()) {
       Json::Value error;
       error["error"] = "Proof not found";
       auto resp = HttpResponse::newHttpJsonResponse(error);
@@ -991,7 +1000,7 @@ Task<> Offers::create_escrow(
         "WHERE o.id = $1",
         std::stoi(id));
 
-    if (result.size() == 0) {
+    if (result.empty()) {
       Json::Value error;
       error["error"] = "Offer not found";
       auto resp = HttpResponse::newHttpJsonResponse(error);
@@ -1021,7 +1030,7 @@ Task<> Offers::create_escrow(
         "RETURNING id",
         std::stoi(id), std::stoi(current_user_id), offer_user_id, amount);
 
-    if (escrow_result.size() == 0) {
+    if (escrow_result.empty()) {
       Json::Value error;
       error["error"] = "Failed to create escrow";
       auto resp = HttpResponse::newHttpJsonResponse(error);
@@ -1100,7 +1109,7 @@ Task<> Offers::get_escrow(HttpRequestPtr req,
         "WHERE o.id = $1",
         std::stoi(id));
 
-    if (result.size() == 0) {
+    if (result.empty()) {
       Json::Value error;
       error["error"] = "Offer not found";
       auto resp = HttpResponse::newHttpJsonResponse(error);
@@ -1135,7 +1144,7 @@ Task<> Offers::get_escrow(HttpRequestPtr req,
         "LIMIT 1",
         std::stoi(id));
 
-    if (escrow_result.size() == 0) {
+    if (escrow_result.empty()) {
       Json::Value response;
       response["status"] = "success";
       response["has_escrow"] = false;

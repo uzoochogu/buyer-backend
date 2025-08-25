@@ -1,33 +1,15 @@
 #include <drogon/HttpClient.h>
-#include <drogon/drogon.h>
 #include <drogon/drogon_test.h>
 #include <drogon/utils/Utilities.h>
 
 #include <string>
 
+#include "helpers.hpp"
+
 DROGON_TEST(ProofsAndEscrowTest) {
-  // Setup test database connection
   auto db_client = drogon::app().getDbClient();
 
-  // Clean up any test data from previous runs
-  REQUIRE_NOTHROW(
-      db_client->execSqlSync("DELETE FROM escrow_transactions WHERE offer_id "
-                             "IN (SELECT id FROM offers WHERE "
-                             "title LIKE 'Test Escrow Offer%')"));
-  REQUIRE_NOTHROW(
-      db_client->execSqlSync("DELETE FROM product_proofs WHERE offer_id IN "
-                             "(SELECT id FROM offers WHERE "
-                             "title LIKE 'Test Escrow Offer%')"));
-  REQUIRE_NOTHROW(db_client->execSqlSync(
-      "DELETE FROM offers WHERE title LIKE 'Test Escrow Offer%'"));
-  REQUIRE_NOTHROW(db_client->execSqlSync(
-      "DELETE FROM posts WHERE content LIKE 'Test post for escrow testing%'"));
-  REQUIRE_NOTHROW(db_client->execSqlSync(
-      "DELETE FROM user_sessions WHERE user_id IN (SELECT id FROM users WHERE "
-      "username = 'testescrow1' OR username = 'testescrow2')"));
-  REQUIRE_NOTHROW(
-      db_client->execSqlSync("DELETE FROM users WHERE username = 'testescrow1' "
-                             "OR username = 'testescrow2'"));
+  helpers::cleanup_db();
 
   // Create test users for escrow testing
   auto client = drogon::HttpClient::newHttpClient("http://127.0.0.1:5555");
@@ -141,23 +123,5 @@ DROGON_TEST(ProofsAndEscrowTest) {
 
   //   Test create_escrow
 
-  // Clean up test data
-  REQUIRE_NOTHROW(
-      db_client->execSqlSync("DELETE FROM escrow_transactions WHERE offer_id "
-                             "IN (SELECT id FROM offers WHERE "
-                             "title LIKE 'Test Escrow Offer%')"));
-  REQUIRE_NOTHROW(
-      db_client->execSqlSync("DELETE FROM product_proofs WHERE offer_id IN "
-                             "(SELECT id FROM offers WHERE "
-                             "title LIKE 'Test Escrow Offer%')"));
-  REQUIRE_NOTHROW(db_client->execSqlSync(
-      "DELETE FROM offers WHERE title LIKE 'Test Escrow Offer%'"));
-  REQUIRE_NOTHROW(db_client->execSqlSync(
-      "DELETE FROM posts WHERE content LIKE 'Test post for escrow testing%'"));
-  REQUIRE_NOTHROW(db_client->execSqlSync(
-      "DELETE FROM user_sessions WHERE user_id IN (SELECT id FROM users WHERE "
-      "username = 'testescrow1' OR username = 'testescrow2')"));
-  REQUIRE_NOTHROW(
-      db_client->execSqlSync("DELETE FROM users WHERE username = 'testescrow1' "
-                             "OR username = 'testescrow2'"));
+  helpers::cleanup_db();
 }

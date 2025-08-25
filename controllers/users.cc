@@ -12,13 +12,16 @@
 #include <drogon/orm/Row.h>
 #include <drogon/orm/SqlBinder.h>
 
-using namespace drogon;
-using namespace drogon::orm;
+using drogon::app;
+using drogon::HttpResponse;
+using drogon::k500InternalServerError;
+using drogon::orm::DrogonDbException;
 
-using namespace api::v1;
+using api::v1::Users;
 
-Task<> Users::get_users(HttpRequestPtr req,
-                        std::function<void(const HttpResponsePtr&)> callback) {
+drogon::Task<> Users::get_users(
+    drogon::HttpRequestPtr req,
+    std::function<void(const drogon::HttpResponsePtr&)> callback) {
   auto db = app().getDbClient();
 
   try {

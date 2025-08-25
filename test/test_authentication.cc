@@ -1,20 +1,15 @@
 #include <drogon/HttpClient.h>
-#include <drogon/drogon.h>
 #include <drogon/drogon_test.h>
 #include <drogon/utils/Utilities.h>
 
 #include <string>
 
+#include "helpers.hpp"
+
 DROGON_TEST(AuthenticationTest) {
-  // Setup test database connection
   auto db_client = drogon::app().getDbClient();
 
-  // Clean up any test data from previous runs
-  REQUIRE_NOTHROW(db_client->execSqlSync(
-      "DELETE FROM user_sessions WHERE user_id IN (SELECT id FROM users WHERE "
-      "username = 'testuser')"));
-  REQUIRE_NOTHROW(
-      db_client->execSqlSync("DELETE FROM users WHERE username = 'testuser'"));
+  helpers::cleanup_db();
 
   // Test registration
   auto client = drogon::HttpClient::newHttpClient("http://127.0.0.1:5555");
@@ -91,10 +86,5 @@ DROGON_TEST(AuthenticationTest) {
   json = resp.second->getJsonObject();
   REQUIRE((*json)["status"].asString() == "success");
 
-  // Clean up test data
-  REQUIRE_NOTHROW(db_client->execSqlSync(
-      "DELETE FROM user_sessions WHERE user_id IN (SELECT id FROM users WHERE "
-      "username = 'testuser')"));
-  REQUIRE_NOTHROW(
-      db_client->execSqlSync("DELETE FROM users WHERE username = 'testuser'"));
+  helpers::cleanup_db();
 }

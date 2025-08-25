@@ -29,23 +29,23 @@ class MediaController : public drogon::HttpController<MediaController> {
                 "AuthMiddleware");
   METHOD_LIST_END
 
-  drogon::Task<> get_upload_url(
+  static drogon::Task<> get_upload_url(
       const drogon::HttpRequestPtr req,
       std::function<void(const drogon::HttpResponsePtr &)> callback);
 
-  drogon::Task<> verify_proof(
+  static drogon::Task<> verify_proof(
       const drogon::HttpRequestPtr req,
       std::function<void(const drogon::HttpResponsePtr &)> callback);
 
-  drogon::Task<> get_media_url(
+  static drogon::Task<> get_media_url(
       const drogon::HttpRequestPtr req,
       std::function<void(const drogon::HttpResponsePtr &)> callback);
 
-  drogon::Task<> verify_object_key(
+  static drogon::Task<> verify_object_key(
       const drogon::HttpRequestPtr req,
       std::function<void(const drogon::HttpResponsePtr &)> callback);
 
-  drogon::Task<> get_media_metadata(
+  static drogon::Task<> get_media_metadata(
       const drogon::HttpRequestPtr req,
       std::function<void(const drogon::HttpResponsePtr &)> callback);
 };

@@ -12,10 +12,16 @@
 #include <drogon/orm/Row.h>
 #include <drogon/orm/SqlBinder.h>
 
-using namespace drogon;
-using namespace drogon::orm;
+using drogon::app;
+using drogon::HttpRequestPtr;
+using drogon::HttpResponse;
+using drogon::HttpResponsePtr;
+using drogon::k500InternalServerError;
+using drogon::Task;
+using drogon::orm::DrogonDbException;
+using drogon::orm::Transaction;
 
-using namespace api::v1;
+using api::v1::Orders;
 
 Task<> Orders::get_orders(
     HttpRequestPtr req, std::function<void(const HttpResponsePtr&)> callback) {
@@ -64,7 +70,7 @@ Task<> Orders::create_order(
 
     Json::Value ret;
     ret["status"] = "success";
-    if (result.size() > 0) {
+    if (!result.empty()) {
       ret["order_id"] = result[0]["id"].as<int>();
     }
 

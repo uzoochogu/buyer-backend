@@ -2,10 +2,14 @@
 
 #include <drogon/HttpController.h>
 
-using namespace drogon;
-
 namespace api {
 namespace v1 {
+
+using drogon::Get;
+using drogon::Options;
+using drogon::Post;
+using drogon::Put;
+
 class Community : public drogon::HttpController<Community> {
  public:
   METHOD_LIST_BEGIN
@@ -42,37 +46,48 @@ class Community : public drogon::HttpController<Community> {
                 "CorsMiddleware", "AuthMiddleware");
   METHOD_LIST_END
 
-  Task<> get_posts(const HttpRequestPtr req,
-                   std::function<void(const HttpResponsePtr&)> callback);
-  Task<> get_post_by_id(HttpRequestPtr req,
-                        std::function<void(const HttpResponsePtr&)> callback,
-                        std::string id);
-  Task<> filter_posts(HttpRequestPtr req,
-                      std::function<void(const HttpResponsePtr&)> callback);
-  Task<> get_subscriptions(
-      HttpRequestPtr req, std::function<void(const HttpResponsePtr&)> callback);
-  Task<> get_popular_tags(HttpRequestPtr req,
-                          std::function<void(const HttpResponsePtr&)> callback);
+  static drogon::Task<> get_posts(
+      const drogon::HttpRequestPtr req,
+      std::function<void(const drogon::HttpResponsePtr&)> callback);
+  static drogon::Task<> get_post_by_id(
+      drogon::HttpRequestPtr req,
+      std::function<void(const drogon::HttpResponsePtr&)> callback,
+      std::string id);
+  static drogon::Task<> filter_posts(
+      drogon::HttpRequestPtr req,
+      std::function<void(const drogon::HttpResponsePtr&)> callback);
+  static drogon::Task<> get_subscriptions(
+      drogon::HttpRequestPtr req,
+      std::function<void(const drogon::HttpResponsePtr&)> callback);
+  static drogon::Task<> get_popular_tags(
+      drogon::HttpRequestPtr req,
+      std::function<void(const drogon::HttpResponsePtr&)> callback);
 
-  Task<> create_post(HttpRequestPtr req,
-                     std::function<void(const HttpResponsePtr&)> callback);
-  Task<> subscribe_to_post(HttpRequestPtr req,
-                           std::function<void(const HttpResponsePtr&)> callback,
-                           std::string id);
-  Task<> unsubscribe_from_post(
-      HttpRequestPtr req, std::function<void(const HttpResponsePtr&)> callback,
+  static drogon::Task<> create_post(
+      drogon::HttpRequestPtr req,
+      std::function<void(const drogon::HttpResponsePtr&)> callback);
+  static drogon::Task<> subscribe_to_post(
+      drogon::HttpRequestPtr req,
+      std::function<void(const drogon::HttpResponsePtr&)> callback,
+      std::string id);
+  static drogon::Task<> unsubscribe_from_post(
+      drogon::HttpRequestPtr req,
+      std::function<void(const drogon::HttpResponsePtr&)> callback,
       std::string id);
 
-  Task<> subscribe_to_entity(
-      HttpRequestPtr req, std::function<void(const HttpResponsePtr&)> callback,
+  static drogon::Task<> subscribe_to_entity(
+      drogon::HttpRequestPtr req,
+      std::function<void(const drogon::HttpResponsePtr&)> callback,
       std::string name);
-  Task<> unsubscribe_from_entity(
-      HttpRequestPtr req, std::function<void(const HttpResponsePtr&)> callback,
+  static drogon::Task<> unsubscribe_from_entity(
+      drogon::HttpRequestPtr req,
+      std::function<void(const drogon::HttpResponsePtr&)> callback,
       std::string name);
 
-  Task<> update_post(HttpRequestPtr req,
-                     std::function<void(const HttpResponsePtr&)> callback,
-                     std::string id);
+  static drogon::Task<> update_post(
+      drogon::HttpRequestPtr req,
+      std::function<void(const drogon::HttpResponsePtr&)> callback,
+      std::string id);
 };
 }  // namespace v1
 }  // namespace api

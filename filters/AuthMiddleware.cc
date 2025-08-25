@@ -9,31 +9,30 @@
 
 #include "../config/config.hpp"
 
-using namespace drogon;
+using drogon::HttpResponse;
+using drogon::k401Unauthorized;
 
-class AuthMiddleware : public HttpMiddleware<AuthMiddleware> {
+class AuthMiddleware : public drogon::HttpCoroMiddleware<AuthMiddleware> {
  public:
-  AuthMiddleware() {};
+  AuthMiddleware() = default;
 
-  void invoke(const HttpRequestPtr &req, MiddlewareNextCallback &&nextCb,
-              MiddlewareCallback &&mcb) override {
-    // Skip OPTIONS requests (for CORS)
-    if (req->getMethod() == HttpMethod::Options) {
-      nextCb(std::move(mcb));
-      return;
+  drogon::Task<drogon::HttpResponsePtr> invoke(
+      const drogon::HttpRequestPtr &req,
+      drogon::MiddlewareNextAwaiter &&next) override {
+    // Skip OPTIONS requests (which is used for CORS)
+    if (req->getMethod() == drogon::HttpMethod::Options) {
+      auto resp = co_await next;
+      co_return resp;
     }
-
     try {
-      // Get the Authorization header
+      // Authorization header with Bearer prefix
       const std::string &auth_header = req->getHeader("Authorization");
 
-      // Check if Authorization header exists and has the Bearer prefix
       if (auth_header.empty() || auth_header.substr(0, 7) != "Bearer ") {
         auto resp = HttpResponse::newHttpJsonResponse(
             {{"error", "Unauthorized: No valid token provided"}});
         resp->setStatusCode(k401Unauthorized);
-        mcb(resp);
-        return;
+        co_return resp;
       }
 
       // Extract the token
@@ -72,13 +71,14 @@ class AuthMiddleware : public HttpMiddleware<AuthMiddleware> {
       req->getAttributes()->insert("current_user_id", user_id);
 
       // Token is valid, proceed to the next middleware/controller
-      nextCb(std::move(mcb));
+      auto resp = co_await next;
+      co_return resp;
     } catch (const std::exception &e) {
       LOG_ERROR << "Auth error: " << e.what();
       auto resp = HttpResponse::newHttpJsonResponse(
           {{"error", "Unauthorized: Invalid token"}});
       resp->setStatusCode(k401Unauthorized);
-      mcb(resp);
+      co_return (resp);
     }
   }
 };

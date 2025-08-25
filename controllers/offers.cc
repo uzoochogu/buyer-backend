@@ -19,9 +19,18 @@
 #include "../utilities/conversion.hpp"
 #include "scenario_specific_utils.hpp"
 
-using namespace drogon;
-using namespace drogon::orm;
-using namespace api::v1;
+using api::v1::Offers;
+using drogon::app;
+using drogon::HttpResponse;
+using drogon::HttpResponsePtr;
+using drogon::k400BadRequest;
+using drogon::k403Forbidden;
+using drogon::k404NotFound;
+using drogon::k500InternalServerError;
+using drogon::Task;
+using drogon::orm::DrogonDbException;
+using drogon::orm::Result;
+using drogon::orm::Transaction;
 
 // Get all offers for a post
 Task<> Offers::get_offers_for_post(
@@ -37,7 +46,7 @@ Task<> Offers::get_offers_for_post(
     auto result = co_await db->execSqlCoro(
         "SELECT user_id FROM posts WHERE id = $1", std::stoi(post_id));
 
-    if (result.size() == 0) {
+    if (result.empty()) {
       Json::Value error;
       error["error"] = "Post not found";
       auto resp = HttpResponse::newHttpJsonResponse(error);
@@ -155,7 +164,7 @@ Task<> Offers::create_offer(
     auto result = co_await db->execSqlCoro(
         "SELECT user_id FROM posts WHERE id = $1", std::stoi(post_id));
 
-    if (result.size() < 1) {
+    if (result.empty()) {
       Json::Value error;
       error["error"] = "Post not found";
       auto resp = HttpResponse::newHttpJsonResponse(error);
@@ -186,7 +195,7 @@ Task<> Offers::create_offer(
           std::stoi(post_id), std::stoi(current_user_id), title, description,
           price, price, is_public);
 
-      if (insert_result.size() < 1) {
+      if (insert_result.empty()) {
         throw std::runtime_error("Initial insert failed");
       }
 
@@ -302,7 +311,7 @@ Task<> Offers::get_offer(HttpRequestPtr req,
         "WHERE o.id = $1",
         std::stoi(id));
 
-    if (result.size() < 1) {
+    if (result.empty()) {
       Json::Value error;
       error["error"] = "Offer not found";
       auto resp = HttpResponse::newHttpJsonResponse(error);
@@ -400,7 +409,7 @@ Task<> Offers::update_offer(
     auto result = co_await db->execSqlCoro(
         "SELECT user_id, status FROM offers WHERE id = $1", std::stoi(id));
 
-    if (result.size() < 1) {
+    if (result.empty()) {
       Json::Value error;
       error["error"] = "Offer not found";
       auto resp = HttpResponse::newHttpJsonResponse(error);
@@ -461,7 +470,7 @@ Task<> Offers::update_offer(
           std::stoi(id), has_title, title, has_description, description,
           has_price, price, has_is_public, is_public);
 
-      if (update_result.size() < 1) {
+      if (update_result.empty()) {
         throw std::runtime_error("initial update failed");
       }
 
@@ -508,7 +517,7 @@ Task<> Offers::update_offer(
       ret["status"] = "success";
       ret["message"] = "Offer updated successfully";
       ret["offer_id"] = id;
-      if (processed_media.size() > 0) {
+      if (!processed_media.empty()) {
         ret["media"] = processed_media;
       }
       auto resp = HttpResponse::newHttpJsonResponse(ret);
@@ -601,7 +610,7 @@ Task<> Offers::accept_offer(
         "WHERE o.id = $1",
         std::stoi(id));
 
-    if (result.size() == 0) {
+    if (result.empty()) {
       Json::Value error;
       error["error"] = "Offer not found";
       auto resp = HttpResponse::newHttpJsonResponse(error);
@@ -657,7 +666,7 @@ Task<> Offers::accept_offer(
 
       // If there are pending negotiations, accept the latest one and reject
       // others
-      if (negotiation_result.size() > 0) {
+      if (!negotiation_result.empty()) {
         int latest_negotiation_id = negotiation_result[0]["id"].as<int>();
         std::string negotiation_id_str = std::to_string(latest_negotiation_id);
 
@@ -668,13 +677,8 @@ Task<> Offers::accept_offer(
             "WHERE id = $1",
             latest_negotiation_id);
 
-        LOG_INFO << "Before Point 1" << "\n";
-        std::cout << std::endl;
         // Update message metadata for the accepted negotiation
         update_message_metadata(trans, negotiation_id_str, "accepted", true);
-
-        LOG_INFO << "POINT 1" << "\n";
-        std::cout << std::endl;
 
         // Reject all other negotiations for this offer
         auto other_negotiations_result = co_await trans->execSqlCoro(
@@ -687,9 +691,6 @@ Task<> Offers::accept_offer(
         LOG_INFO << "other_negotiations_result: "
                  << other_negotiations_result.size() << "\n";
 
-        LOG_INFO << "POINT 2" << "\n";
-        std::cout << std::endl;
-
         // Update message metadata for rejected negotiations
         for (const auto& row : other_negotiations_result) {
           std::string rejected_negotiation_id = row["id"].as<std::string>();
@@ -697,8 +698,6 @@ Task<> Offers::accept_offer(
                                   true);
         }
 
-        LOG_INFO << "POINT 3" << "\n";
-        std::cout << std::endl;
         // Continue with rejecting other offers
         rejected_offers_result = co_await trans->execSqlCoro(
             "UPDATE offers SET status = 'rejected', negotiation_status = "
@@ -706,17 +705,12 @@ Task<> Offers::accept_offer(
             "AND status = 'pending' RETURNING id, updated_at",
             post_id, std::stoi(id));
 
-        LOG_INFO << "POINT 4" << "\n";
-        std::cout << std::endl;
-
         // Update message metadata for all rejected offers
         for (const auto& row : rejected_offers_result) {
           std::string rejected_offer_id = row["id"].as<std::string>();
           update_message_metadata(trans, rejected_offer_id, "rejected");
         }
 
-        LOG_INFO << "POINT 5" << "\n";
-        std::cout << std::endl;
         // Reject all pending price negotiations for other offers
         auto rejected_negotiations_result = co_await trans->execSqlCoro(
             "UPDATE price_negotiations pn "
@@ -733,8 +727,6 @@ Task<> Offers::accept_offer(
           update_message_metadata(trans, rejected_negotiation_id, "rejected",
                                   true);
         }
-        LOG_INFO << "POINT 6" << "\n";
-        std::cout << std::endl;
 
         // Update post status to reflect that an offer was accepted
         co_await trans->execSqlCoro(
@@ -868,7 +860,7 @@ Task<> Offers::accept_counter_offer(
         "WHERE o.id = $1",
         std::stoi(id));
 
-    if (result.size() == 0) {
+    if (result.empty()) {
       Json::Value error;
       error["error"] = "Offer not found";
       auto resp = HttpResponse::newHttpJsonResponse(error);
@@ -912,7 +904,7 @@ Task<> Offers::accept_counter_offer(
           "ORDER BY created_at DESC LIMIT 1",
           std::stoi(id));
 
-      if (price_result.size() == 0) {
+      if (price_result.empty()) {
         Json::Value error;
         error["error"] = "No pending negotiations found";
         auto resp = HttpResponse::newHttpJsonResponse(error);
@@ -1081,7 +1073,7 @@ Task<> Offers::reject_offer(
         "WHERE o.id = $1",
         std::stoi(id));
 
-    if (result.size() == 0) {
+    if (result.empty()) {
       Json::Value error;
       error["error"] = "Offer not found";
       auto resp = HttpResponse::newHttpJsonResponse(error);
@@ -1330,7 +1322,7 @@ Task<> Offers::mark_notification_read(
         "RETURNING id",
         std::stoi(id), std::stoi(current_user_id));
 
-    if (result.size() == 0) {
+    if (result.empty()) {
       Json::Value error;
       error["error"] = "Notification not found or you don't have permission";
       auto resp = HttpResponse::newHttpJsonResponse(error);

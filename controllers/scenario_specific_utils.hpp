@@ -17,8 +17,11 @@
  */
 
 /**
- * Naive processing of available media.
+ * @brief Naive processing of available media.
  * It runs using an existing db transaction.
+ * Processing involves checks for validity of object key making necessary
+ * media attachment inserts.
+ * @return boolean.
  * false means there was an error,
  * returns true if processing is successful even if it didn't process all.
  */
@@ -64,7 +67,7 @@ inline drogon::Task<bool> quick_process_media_attachments(
         "RETURNING id",
         current_user_id, storage_key, file_name, mime_type, size);
 
-    if (media_result.size() > 0) {
+    if (!media_result.empty()) {
       int media_id = media_result[0]["id"].as<int>();
       std::string query =
           std::format("INSERT INTO {}_media ({}_id, media_id) VALUES ($1, $2)",
@@ -77,9 +80,11 @@ inline drogon::Task<bool> quick_process_media_attachments(
 }
 
 /**
- * Full processing of available media, returning processed media.
+ * @brief Full processing of available media, returning processed media.
  * It runs using an existing db transaction.
- * Error is represented as a Json::nullValue.
+ * Processing involves checks for validity of object key making necessary
+ * media attachment inserts.
+ * @return Json::Value. Error is represented as a Json::nullValue.
  * If the some media is valid, a Json::arrayValue containing the processed
  * media info is returned.
  * Parameters passed by value/moved to avoid dangling references.
@@ -127,7 +132,7 @@ inline drogon::Task<Json::Value> process_media_attachments(
         "RETURNING id",
         current_user_id, storage_key, file_name, mime_type, size);
 
-    if (media_result.size() > 0) {
+    if (!media_result.empty()) {
       int media_id = media_result[0]["id"].as<int>();
       std::string query =
           std::format("INSERT INTO {}_media ({}_id, media_id) VALUES ($1, $2)",
@@ -163,8 +168,9 @@ inline drogon::Task<Json::Value> process_media_attachments(
 }
 
 /**
- * Fetches available media.
+ * @brief Fetches available media.
  * It runs using an existing db transaction.
+ * @return Json::Value.
  * Error is represented as a Json::nullValue.
  * If the some media is valid, a Json::arrayValue containing the fetched media.
  * Parameters passed by value to avoid dangling references.
@@ -182,7 +188,7 @@ inline drogon::Task<Json::Value> get_media_attachments(
           media_table_prefix, media_table_prefix),
       media_table_prefix_id);
 
-  if (media_result.size() > 0) {
+  if (!media_result.empty()) {
     Json::Value media_array(Json::arrayValue);
 
     for (const auto& media_row : media_result) {
