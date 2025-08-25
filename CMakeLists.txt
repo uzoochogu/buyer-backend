@@ -39,8 +39,6 @@ find_package(cppzmq CONFIG REQUIRED)
 find_package(Drogon CONFIG REQUIRED)
 find_package(jwt-cpp CONFIG REQUIRED)
 find_package(unofficial-argon2 CONFIG REQUIRED)
-find_path(MLPACK_INCLUDE_DIRS "mlpack.hpp")
-find_package(Armadillo CONFIG REQUIRED)
 find_package(aws-cpp-sdk-core REQUIRED)
 find_package(aws-cpp-sdk-s3 REQUIRED)
 
@@ -48,7 +46,6 @@ target_link_libraries(${PROJECT_NAME} PRIVATE Drogon::Drogon
                                               jwt-cpp::jwt-cpp 
                                               unofficial::argon2::libargon2
                                               cppzmq cppzmq-static
-                                              armadillo
 #                                              redis++::redis++
                                               Boost::uuid
                                               aws-cpp-sdk-core

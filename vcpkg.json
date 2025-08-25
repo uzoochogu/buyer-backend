@@ -27,7 +27,6 @@
       ]
     },
     "jwt-cpp",
-    "mlpack",
     {
       "name": "redis-plus-plus",
       "features": [

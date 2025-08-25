@@ -3,8 +3,6 @@
 #include <drogon/HttpController.h>
 #include <drogon/orm/DbClient.h>
 
-using namespace drogon;
-
 struct LocationPoint {
   double latitude;
   double longitude;
@@ -26,34 +24,38 @@ struct LocationPoint {
 
 namespace api {
 namespace v1 {
-class LocationController : public HttpController<LocationController> {
+
+class LocationController : public drogon::HttpController<LocationController> {
  public:
   METHOD_LIST_BEGIN
-  ADD_METHOD_TO(LocationController::add_location, "/api/v1/location", Post,
-                Options, "CorsMiddleware", "AuthMiddleware");
+  ADD_METHOD_TO(LocationController::add_location, "/api/v1/location",
+                drogon::Post, drogon::Options, "CorsMiddleware",
+                "AuthMiddleware");
   ADD_METHOD_TO(LocationController::get_clusters, "/api/v1/location/clusters",
-                Get, Options, "CorsMiddleware", "AuthMiddleware");
-  ADD_METHOD_TO(LocationController::find_nearby, "/api/v1/location/nearby", Get,
-                Options, "CorsMiddleware", "AuthMiddleware");
+                drogon::Get, drogon::Options, "CorsMiddleware",
+                "AuthMiddleware");
+  ADD_METHOD_TO(LocationController::find_nearby, "/api/v1/location/nearby",
+                drogon::Get, drogon::Options, "CorsMiddleware",
+                "AuthMiddleware");
   ADD_METHOD_TO(LocationController::recluster, "/api/v1/location/recluster",
-                Post, Options, "CorsMiddleware", "AuthMiddleware");
+                drogon::Post, drogon::Options, "CorsMiddleware",
+                "AuthMiddleware");
   METHOD_LIST_END
 
-  Task<> add_location(const HttpRequestPtr req,
-                      std::function<void(const HttpResponsePtr&)> callback);
-  Task<> get_clusters(const HttpRequestPtr req,
-                      std::function<void(const HttpResponsePtr&)> callback);
-  Task<> find_nearby(const HttpRequestPtr req,
-                     std::function<void(const HttpResponsePtr&)> callback);
-  Task<> recluster(const HttpRequestPtr req,
-                   std::function<void(const HttpResponsePtr&)> callback);
-
- private:
-  Task<std::vector<LocationPoint>> get_all_locations_from_db();
-  Task<void> update_cluster_assignments(
-      const std::vector<std::string>& cluster_ids,
-      const std::vector<LocationPoint>& points);
-  Task<void> perform_clustering();
+  static drogon::Task<> add_location(
+      const drogon::HttpRequestPtr req,
+      std::function<void(const drogon::HttpResponsePtr&)> callback);
+  // Paginated by offset (15 per page)
+  static drogon::Task<> get_clusters(
+      const drogon::HttpRequestPtr req,
+      std::function<void(const drogon::HttpResponsePtr&)> callback);
+  // Paginated by offset (15 per page)
+  static drogon::Task<> find_nearby(
+      const drogon::HttpRequestPtr req,
+      std::function<void(const drogon::HttpResponsePtr&)> callback);
+  static drogon::Task<> recluster(
+      const drogon::HttpRequestPtr req,
+      std::function<void(const drogon::HttpResponsePtr&)> callback);
 };
 }  // namespace v1
 }  // namespace api
