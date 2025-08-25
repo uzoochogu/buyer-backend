@@ -13,7 +13,7 @@
 // #include "./subber/redis_pub_manager.hpp"
 // #include "./subber/redis_sub_manager.hpp"
 
-inline static constexpr const std::uint32_t MAX_MEDIA_SIZE = 5U;
+inline constexpr std::uint32_t MAX_MEDIA_SIZE = 5U;
 
 class ServiceManager {
  public:
