@@ -12,13 +12,14 @@
 #include <drogon/orm/Row.h>
 #include <drogon/orm/SqlBinder.h>
 
-using namespace drogon;
-using namespace drogon::orm;
+using drogon::app;
+using drogon::orm::DrogonDbException;
 
 using namespace api::v1;
 
-Task<> Dashboard::get_dashboard_data(
-    HttpRequestPtr req, std::function<void(const HttpResponsePtr&)> callback) {
+drogon::Task<> Dashboard::get_dashboard_data(
+    drogon::HttpRequestPtr req,
+    std::function<void(const drogon::HttpResponsePtr&)> callback) {
   auto db = app().getDbClient();
 
   try {
@@ -34,14 +35,14 @@ Task<> Dashboard::get_dashboard_data(
     // Prepare response
     Json::Value ret;
     ret["orders"] = orders_data;
-    auto resp = HttpResponse::newHttpJsonResponse(ret);
+    auto resp = drogon::HttpResponse::newHttpJsonResponse(ret);
     callback(resp);
   } catch (const DrogonDbException& e) {
     LOG_ERROR << "Database error: " << e.base().what();
     Json::Value error;
     error["error"] = "Database error";
-    auto resp = HttpResponse::newHttpJsonResponse(error);
-    resp->setStatusCode(k500InternalServerError);
+    auto resp = drogon::HttpResponse::newHttpJsonResponse(error);
+    resp->setStatusCode(drogon::k500InternalServerError);
     callback(resp);
   }
 

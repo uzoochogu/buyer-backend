@@ -2,10 +2,15 @@
 
 #include <drogon/HttpController.h>
 
-using namespace drogon;
-
 namespace api {
 namespace v1 {
+using drogon::Get;
+using drogon::HttpRequestPtr;
+using drogon::HttpResponsePtr;
+using drogon::Options;
+using drogon::Post;
+using drogon::Put;
+
 class Offers : public drogon::HttpController<Offers> {
  public:
   METHOD_LIST_BEGIN
@@ -86,86 +91,86 @@ class Offers : public drogon::HttpController<Offers> {
                 "CorsMiddleware", "AuthMiddleware");
   METHOD_LIST_END
 
-  Task<> get_offers_for_post(
+  static drogon::Task<> get_offers_for_post(
       HttpRequestPtr req, std::function<void(const HttpResponsePtr&)> callback,
       std::string post_id);
 
-  Task<> create_offer(HttpRequestPtr req,
-                      std::function<void(const HttpResponsePtr&)> callback,
-                      std::string post_id);
+  static drogon::Task<> create_offer(
+      HttpRequestPtr req, std::function<void(const HttpResponsePtr&)> callback,
+      std::string post_id);
 
-  Task<> get_offer(HttpRequestPtr req,
-                   std::function<void(const HttpResponsePtr&)> callback,
-                   std::string id);
-
-  Task<> update_offer(HttpRequestPtr req,
-                      std::function<void(const HttpResponsePtr&)> callback,
-                      std::string id);
-
-  Task<> accept_offer(HttpRequestPtr req,
-                      std::function<void(const HttpResponsePtr&)> callback,
-                      std::string id);
-
-  Task<> accept_counter_offer(
+  static drogon::Task<> get_offer(
       HttpRequestPtr req, std::function<void(const HttpResponsePtr&)> callback,
       std::string id);
 
-  Task<> reject_offer(HttpRequestPtr req,
-                      std::function<void(const HttpResponsePtr&)> callback,
-                      std::string id);
-
-  Task<> get_my_offers(HttpRequestPtr req,
-                       std::function<void(const HttpResponsePtr&)> callback);
-
-  Task<> get_received_offers(
-      HttpRequestPtr req, std::function<void(const HttpResponsePtr&)> callback);
-
-  Task<> get_notifications(
-      HttpRequestPtr req, std::function<void(const HttpResponsePtr&)> callback);
-
-  Task<> mark_notification_read(
+  static drogon::Task<> update_offer(
       HttpRequestPtr req, std::function<void(const HttpResponsePtr&)> callback,
       std::string id);
 
-  Task<> mark_all_notifications_read(
+  static drogon::Task<> accept_offer(
+      HttpRequestPtr req, std::function<void(const HttpResponsePtr&)> callback,
+      std::string id);
+
+  static drogon::Task<> accept_counter_offer(
+      HttpRequestPtr req, std::function<void(const HttpResponsePtr&)> callback,
+      std::string id);
+
+  static drogon::Task<> reject_offer(
+      HttpRequestPtr req, std::function<void(const HttpResponsePtr&)> callback,
+      std::string id);
+
+  static drogon::Task<> get_my_offers(
       HttpRequestPtr req, std::function<void(const HttpResponsePtr&)> callback);
 
-  Task<> negotiate_offer(HttpRequestPtr req,
-                         std::function<void(const HttpResponsePtr&)> callback,
-                         std::string id);
+  static drogon::Task<> get_received_offers(
+      HttpRequestPtr req, std::function<void(const HttpResponsePtr&)> callback);
 
-  Task<> get_negotiations(HttpRequestPtr req,
-                          std::function<void(const HttpResponsePtr&)> callback,
-                          std::string id);
+  static drogon::Task<> get_notifications(
+      HttpRequestPtr req, std::function<void(const HttpResponsePtr&)> callback);
+
+  static drogon::Task<> mark_notification_read(
+      HttpRequestPtr req, std::function<void(const HttpResponsePtr&)> callback,
+      std::string id);
+
+  static drogon::Task<> mark_all_notifications_read(
+      HttpRequestPtr req, std::function<void(const HttpResponsePtr&)> callback);
+
+  static drogon::Task<> negotiate_offer(
+      HttpRequestPtr req, std::function<void(const HttpResponsePtr&)> callback,
+      std::string id);
+
+  static drogon::Task<> get_negotiations(
+      HttpRequestPtr req, std::function<void(const HttpResponsePtr&)> callback,
+      std::string id);
 
   // upcoming features
-  Task<> request_proof(HttpRequestPtr req,
-                       std::function<void(const HttpResponsePtr&)> callback,
-                       std::string id);
+  static drogon::Task<> request_proof(
+      HttpRequestPtr req, std::function<void(const HttpResponsePtr&)> callback,
+      std::string id);
 
-  Task<> submit_proof(HttpRequestPtr req,
-                      std::function<void(const HttpResponsePtr&)> callback,
-                      std::string id);
+  static drogon::Task<> submit_proof(
+      HttpRequestPtr req, std::function<void(const HttpResponsePtr&)> callback,
+      std::string id);
 
-  Task<> get_proofs(HttpRequestPtr req,
-                    std::function<void(const HttpResponsePtr&)> callback,
-                    std::string id);
+  static drogon::Task<> get_proofs(
+      HttpRequestPtr req, std::function<void(const HttpResponsePtr&)> callback,
+      std::string id);
 
-  Task<> approve_proof(HttpRequestPtr req,
-                       std::function<void(const HttpResponsePtr&)> callback,
-                       std::string id, std::string proof_id);
+  static drogon::Task<> approve_proof(
+      HttpRequestPtr req, std::function<void(const HttpResponsePtr&)> callback,
+      std::string id, std::string proof_id);
 
-  Task<> reject_proof(HttpRequestPtr req,
-                      std::function<void(const HttpResponsePtr&)> callback,
-                      std::string id, std::string proof_id);
+  static drogon::Task<> reject_proof(
+      HttpRequestPtr req, std::function<void(const HttpResponsePtr&)> callback,
+      std::string id, std::string proof_id);
 
-  Task<> create_escrow(HttpRequestPtr req,
-                       std::function<void(const HttpResponsePtr&)> callback,
-                       std::string id);
+  static drogon::Task<> create_escrow(
+      HttpRequestPtr req, std::function<void(const HttpResponsePtr&)> callback,
+      std::string id);
 
-  Task<> get_escrow(HttpRequestPtr req,
-                    std::function<void(const HttpResponsePtr&)> callback,
-                    std::string id);
+  static drogon::Task<> get_escrow(
+      HttpRequestPtr req, std::function<void(const HttpResponsePtr&)> callback,
+      std::string id);
 };
 }  // namespace v1
 }  // namespace api
