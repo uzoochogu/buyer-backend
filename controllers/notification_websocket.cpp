@@ -1,10 +1,12 @@
-#ifndef NOTIFICATION_WEBSOCKET_HPP
-#define NOTIFICATION_WEBSOCKET_HPP
-
 // #include "../utilities/uuid_generator.hpp"
 #include "notification_websocket.hpp"
 
 #include "../services/service_manager.hpp"
+
+using drogon::app;
+using drogon::HttpRequestPtr;
+using drogon::WebSocketConnectionPtr;
+using drogon::WebSocketMessageType;
 
 void NotificationWebSocket::handleNewMessage(
     const WebSocketConnectionPtr& wsConnPtr, std::string&& message,
@@ -20,9 +22,10 @@ void NotificationWebSocket::handleNewMessage(
     case WebSocketMessageType::Binary:
       break;
     case WebSocketMessageType::Ping:
-      wsConnPtr->send("Pong");
+      wsConnPtr->send("", drogon::WebSocketMessageType::Pong);
       break;
     case WebSocketMessageType::Pong:
+      wsConnPtr->send("", drogon::WebSocketMessageType::Ping);
       break;
     case WebSocketMessageType::Close:
       wsConnPtr->forceClose();
@@ -110,5 +113,3 @@ void NotificationWebSocket::subscribe_user_to_existing_subs(
     LOG_ERROR << "User Notification subscriptions failed";
   }
 }
-
-#endif  // NOTIFICATION_WEBSOCKET_HPP

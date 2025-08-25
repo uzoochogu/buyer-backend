@@ -9,28 +9,26 @@
 
 #include "../config/config.hpp"
 
-using namespace drogon;
+using drogon::HttpResponse;
 
-class WebSocketAuthMiddleware : public HttpMiddleware<WebSocketAuthMiddleware> {
+class WebSocketAuthMiddleware
+    : public drogon::HttpMiddleware<WebSocketAuthMiddleware> {
  public:
   WebSocketAuthMiddleware() {};
 
-  void invoke(const HttpRequestPtr &req, MiddlewareNextCallback &&nextCb,
-              MiddlewareCallback &&mcb) override {
+  void invoke(const drogon::HttpRequestPtr &req,
+              drogon::MiddlewareNextCallback &&nextCb,
+              drogon::MiddlewareCallback &&mcb) override {
     // Skip OPTIONS requests (for CORS)
-    if (req->getMethod() == HttpMethod::Options) {
+    if (req->getMethod() == drogon::HttpMethod::Options) {
       nextCb(std::move(mcb));
       return;
     }
 
     try {
-      std::string token;
-
       // Try to get token from query parameter first
-      auto token_param = req->getParameter("token");
-      if (!token_param.empty()) {
-        token = token_param;
-      } else {
+      auto token = req->getParameter("token");
+      if (token.empty()) {
         // Fallback to Authorization header
         const std::string &auth_header = req->getHeader("Authorization");
         if (!auth_header.empty() && auth_header.substr(0, 7) == "Bearer ") {
@@ -42,7 +40,7 @@ class WebSocketAuthMiddleware : public HttpMiddleware<WebSocketAuthMiddleware> {
         LOG_ERROR << "WebSocket connection rejected: No token provided";
         auto resp = HttpResponse::newHttpJsonResponse(
             {{"error", "Unauthorized: No token provided"}});
-        resp->setStatusCode(k401Unauthorized);
+        resp->setStatusCode(drogon::k401Unauthorized);
         mcb(resp);
         return;
       }
@@ -95,7 +93,7 @@ class WebSocketAuthMiddleware : public HttpMiddleware<WebSocketAuthMiddleware> {
       LOG_ERROR << "Websocket auth error: " << e.what();
       auto resp = HttpResponse::newHttpJsonResponse(
           {{"error", "Unauthorized: Invalid token"}});
-      resp->setStatusCode(k401Unauthorized);
+      resp->setStatusCode(drogon::k401Unauthorized);
       mcb(resp);
     }
   }
