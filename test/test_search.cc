@@ -1,25 +1,16 @@
 #include <drogon/HttpClient.h>
-#include <drogon/drogon.h>
 #include <drogon/drogon_test.h>
 #include <drogon/utils/Utilities.h>
 
 #include <string>
 
+#include "helpers.hpp"
+
 DROGON_TEST(SearchTest) {
   // Setup test database connection
   auto db_client = drogon::app().getDbClient();
 
-  // Clean up any test data from previous runs
-  REQUIRE_NOTHROW(db_client->execSqlSync(
-      "DELETE FROM user_sessions WHERE user_id IN (SELECT id FROM users WHERE "
-      "username = 'testsearch')"));
-  REQUIRE_NOTHROW(db_client->execSqlSync(
-      "DELETE FROM orders WHERE status = 'test_search_status'"));
-  REQUIRE_NOTHROW(db_client->execSqlSync(
-      "DELETE FROM posts WHERE content LIKE '%test_search_content%'"));
-  REQUIRE_NOTHROW(db_client->execSqlSync(
-      "DELETE FROM users WHERE username = 'testsearch'"));
-
+  helpers::cleanup_db();
   // Create a test user for authentication
   auto client = drogon::HttpClient::newHttpClient("http://127.0.0.1:5555");
   Json::Value register_json;
@@ -142,14 +133,5 @@ DROGON_TEST(SearchTest) {
   auto unauth_search_resp = client->sendRequest(unauth_search_req);
   CHECK(unauth_search_resp.second->getStatusCode() == drogon::k401Unauthorized);
 
-  // Clean up test data
-  REQUIRE_NOTHROW(db_client->execSqlSync(
-      "DELETE FROM user_sessions WHERE user_id IN (SELECT id FROM users WHERE "
-      "username = 'testsearch')"));
-  REQUIRE_NOTHROW(db_client->execSqlSync(
-      "DELETE FROM orders WHERE status = 'test_search_status'"));
-  REQUIRE_NOTHROW(db_client->execSqlSync(
-      "DELETE FROM posts WHERE content LIKE '%test_search_content%'"));
-  REQUIRE_NOTHROW(db_client->execSqlSync(
-      "DELETE FROM users WHERE username = 'testsearch'"));
+  helpers::cleanup_db();
 }

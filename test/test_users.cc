@@ -1,21 +1,17 @@
 #include <drogon/HttpClient.h>
-#include <drogon/drogon.h>
 #include <drogon/drogon_test.h>
 #include <drogon/utils/Utilities.h>
 
 #include <string>
 
+#include "helpers.hpp"
+
+
 DROGON_TEST(UsersTest) {
   // Setup test database connection
   auto db_client = drogon::app().getDbClient();
 
-  // Clean up any test data from previous runs
-  REQUIRE_NOTHROW(db_client->execSqlSync(
-      "DELETE FROM user_sessions WHERE user_id IN (SELECT id FROM users WHERE "
-      "username = 'testuser1' OR username = 'testuser2')"));
-  REQUIRE_NOTHROW(
-      db_client->execSqlSync("DELETE FROM users WHERE username = 'testuser1' "
-                             "OR username = 'testuser2'"));
+  helpers::cleanup_db();
 
   // Create test users for testing
   auto client = drogon::HttpClient::newHttpClient("http://127.0.0.1:5555");
@@ -192,17 +188,5 @@ DROGON_TEST(UsersTest) {
 
   CHECK(is_ordered);
 
-  // Test 8: Verify that the endpoint handles database errors gracefully
-  // This is hard to test directly, but we can check that the controller has
-  // error handling by examining the code. For integration tests, we'll assume
-  // the error handling works.
-
-  // Clean up test data
-  REQUIRE_NOTHROW(db_client->execSqlSync(
-      "DELETE FROM user_sessions WHERE user_id IN (SELECT id FROM users WHERE "
-      "username = 'testuser1' OR username = 'testuser2')"));
-
-  REQUIRE_NOTHROW(
-      db_client->execSqlSync("DELETE FROM users WHERE username = 'testuser1' "
-                             "OR username = 'testuser2'"));
+  helpers::cleanup_db();
 }

@@ -1,23 +1,15 @@
 #include <drogon/HttpClient.h>
-#include <drogon/drogon.h>
 #include <drogon/drogon_test.h>
 #include <drogon/utils/Utilities.h>
 
 #include <string>
 
+#include "helpers.hpp"
+
 DROGON_TEST(OrdersTest) {
-  // Setup test database connection
   auto db_client = drogon::app().getDbClient();
 
-  // Clean up any test data from previous runs
-  REQUIRE_NOTHROW(db_client->execSqlSync(
-      "DELETE FROM orders WHERE user_id IN (SELECT id FROM users WHERE "
-      "username = 'testorder')"));
-  REQUIRE_NOTHROW(db_client->execSqlSync(
-      "DELETE FROM user_sessions WHERE user_id IN (SELECT id FROM users WHERE "
-      "username = 'testorder')"));
-  REQUIRE_NOTHROW(
-      db_client->execSqlSync("DELETE FROM users WHERE username = 'testorder'"));
+  helpers::cleanup_db();
 
   // Create test user for testing
   auto client = drogon::HttpClient::newHttpClient("http://127.0.0.1:5555");
@@ -46,31 +38,7 @@ DROGON_TEST(OrdersTest) {
   CHECK(user_result.size() > 0);
   int user_id = user_result[0]["id"].as<int>();
 
-  // Test 1: Get all orders
-  auto get_orders_req = drogon::HttpRequest::newHttpRequest();
-  get_orders_req->setMethod(drogon::Get);
-  get_orders_req->setPath("/api/v1/orders");
-  get_orders_req->addHeader("Authorization", "Bearer " + token);
-
-  auto get_orders_resp = client->sendRequest(get_orders_req);
-  CHECK(get_orders_resp.second->getStatusCode() == drogon::k200OK);
-
-  auto get_orders_resp_json = get_orders_resp.second->getJsonObject();
-  CHECK(get_orders_resp_json->isArray());
-
-  // Check that we have at least the seed data orders
-  CHECK(get_orders_resp_json->size() >= 10);  // From seed data
-
-  // Verify order structure for first order
-  if (get_orders_resp_json->size() > 0) {
-    const auto& first_order = (*get_orders_resp_json)[0];
-    CHECK(first_order.isMember("id"));
-    CHECK(first_order.isMember("user_id"));
-    CHECK(first_order.isMember("status"));
-    CHECK(first_order.isMember("created_at"));
-  }
-
-  // Test 2: Create a new order
+  // Test 1: Create a new order
   Json::Value create_order_json;
   create_order_json["user_id"] = user_id;
   create_order_json["status"] = "pending";
@@ -89,6 +57,28 @@ DROGON_TEST(OrdersTest) {
   CHECK((*create_order_resp_json)["order_id"].asInt() > 0);
 
   int order_id = (*create_order_resp_json)["order_id"].asInt();
+
+  // Test 2: Get all orders
+  auto get_orders_req = drogon::HttpRequest::newHttpRequest();
+  get_orders_req->setMethod(drogon::Get);
+  get_orders_req->setPath("/api/v1/orders");
+  get_orders_req->addHeader("Authorization", "Bearer " + token);
+
+  auto get_orders_resp = client->sendRequest(get_orders_req);
+  CHECK(get_orders_resp.second->getStatusCode() == drogon::k200OK);
+
+  auto get_orders_resp_json = get_orders_resp.second->getJsonObject();
+  CHECK(get_orders_resp_json->isArray());
+  CHECK(!get_orders_resp_json->empty());
+
+  // Verify order structure for first order
+  if (get_orders_resp_json->size() > 0) {
+    const auto& first_order = (*get_orders_resp_json)[0];
+    CHECK(first_order.isMember("id"));
+    CHECK(first_order.isMember("user_id"));
+    CHECK(first_order.isMember("status"));
+    CHECK(first_order.isMember("created_at"));
+  }
 
   // Test 3: Verify the newly created order is in the list
   auto verify_orders_req = drogon::HttpRequest::newHttpRequest();
@@ -130,11 +120,5 @@ DROGON_TEST(OrdersTest) {
   auto create_order_resp_json2 = create_order_resp2.second->getJsonObject();
   int order_id2 = (*create_order_resp_json2)["order_id"].asInt();
 
-  // Clean up test data
-  REQUIRE_NOTHROW(db_client->execSqlSync(
-      "DELETE FROM orders WHERE id IN ($1, $2)", order_id, order_id2));
-  REQUIRE_NOTHROW(db_client->execSqlSync(
-      "DELETE FROM user_sessions WHERE user_id = $1", user_id));
-  REQUIRE_NOTHROW(
-      db_client->execSqlSync("DELETE FROM users WHERE username = 'testorder'"));
+  helpers::cleanup_db();
 }

@@ -1,34 +1,16 @@
 #include <drogon/HttpClient.h>
-#include <drogon/drogon.h>
 #include <drogon/drogon_test.h>
 #include <drogon/utils/Utilities.h>
 
 #include <string>
 
+#include "helpers.hpp"
+
+
 DROGON_TEST(ChatsTest) {
-  // Setup test database connection
   auto db_client = drogon::app().getDbClient();
 
-  // Clean up any test data from previous runs
-  REQUIRE_NOTHROW(db_client->execSqlSync(
-      "DELETE FROM messages WHERE sender_id IN (SELECT id FROM users WHERE "
-      "username = 'testchat1' OR username = 'testchat2')"));
-  REQUIRE_NOTHROW(db_client->execSqlSync(
-      "DELETE FROM conversation_participants WHERE user_id IN (SELECT id FROM "
-      "users WHERE "
-      "username = 'testchat1' OR username = 'testchat2')"));
-  REQUIRE_NOTHROW(db_client->execSqlSync(
-      "DELETE FROM conversations WHERE name LIKE 'Test Conversation%'"));
-  REQUIRE_NOTHROW(db_client->execSqlSync(
-      "DELETE FROM user_sessions WHERE user_id IN (SELECT id FROM users WHERE "
-      "username = 'testchat1' OR username = 'testchat2')"));
-  REQUIRE_NOTHROW(db_client->execSqlSync(
-      "DELETE FROM offers WHERE title = 'Test Offer for Chat'"));
-  REQUIRE_NOTHROW(db_client->execSqlSync(
-      "DELETE FROM posts WHERE content = 'Test post for chat testing'"));
-  REQUIRE_NOTHROW(
-      db_client->execSqlSync("DELETE FROM users WHERE username = 'testchat1' "
-                             "OR username = 'testchat2'"));
+  helpers::cleanup_db();
 
   // Create test users for chat testing
   auto client = drogon::HttpClient::newHttpClient("http://127.0.0.1:5555");
@@ -481,30 +463,5 @@ DROGON_TEST(ChatsTest) {
   auto invalid_token_resp = client->sendRequest(invalid_token_req);
   CHECK(invalid_token_resp.second->getStatusCode() == drogon::k401Unauthorized);
 
-  // Clean up test data in the correct order to avoid foreign key violations
-  REQUIRE_NOTHROW(db_client->execSqlSync(
-      "DELETE FROM messages WHERE conversation_id IN ($1, $2)", conversation_id,
-      offer_conversation_id));
-
-  REQUIRE_NOTHROW(db_client->execSqlSync(
-      "DELETE FROM conversation_participants WHERE conversation_id IN ($1, $2)",
-      conversation_id, offer_conversation_id));
-
-  REQUIRE_NOTHROW(
-      db_client->execSqlSync("DELETE FROM conversations WHERE id IN ($1, $2)",
-                             conversation_id, offer_conversation_id));
-
-  REQUIRE_NOTHROW(
-      db_client->execSqlSync("DELETE FROM offers WHERE id = $1", offer_id));
-
-  REQUIRE_NOTHROW(
-      db_client->execSqlSync("DELETE FROM posts WHERE id = $1", post_id));
-
-  REQUIRE_NOTHROW(db_client->execSqlSync(
-      "DELETE FROM user_sessions WHERE user_id IN (SELECT id FROM users WHERE "
-      "username = 'testchat1' OR username = 'testchat2')"));
-
-  REQUIRE_NOTHROW(
-      db_client->execSqlSync("DELETE FROM users WHERE username = 'testchat1' "
-                             "OR username = 'testchat2'"));
+  helpers::cleanup_db();
 }

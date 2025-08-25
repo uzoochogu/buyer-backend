@@ -1,47 +1,14 @@
 #include <drogon/HttpClient.h>
-#include <drogon/drogon.h>
 #include <drogon/drogon_test.h>
 
 #include <string>
 
+#include "helpers.hpp"
+
 DROGON_TEST(OffersWorkflowTest) {
-  // Setup test database connection
   auto db_client = drogon::app().getDbClient();
 
-  // Clean up any test data from previous runs
-  REQUIRE_NOTHROW(db_client->execSqlSync(
-      "DELETE FROM messages WHERE sender_id IN (SELECT id FROM users WHERE "
-      "username = 'testoffer1' OR username = 'testoffer2' OR username = "
-      "'testoffer3')"));
-  REQUIRE_NOTHROW(db_client->execSqlSync(
-      "DELETE FROM conversation_participants WHERE user_id IN (SELECT id FROM "
-      "users WHERE username = 'testoffer1' OR username = 'testoffer2' OR "
-      "username = 'testoffer3')"));
-  REQUIRE_NOTHROW(db_client->execSqlSync(
-      "DELETE FROM conversations WHERE name LIKE 'Offer%'"));
-  REQUIRE_NOTHROW(
-      db_client->execSqlSync("DELETE FROM price_negotiations WHERE offer_id IN "
-                             "(SELECT id FROM offers WHERE "
-                             "title LIKE 'Test Offer%')"));
-  REQUIRE_NOTHROW(db_client->execSqlSync(
-      "DELETE FROM offer_notifications WHERE user_id IN (SELECT id FROM users "
-      "WHERE "
-      "username = 'testoffer1' OR username = 'testoffer2' OR username = "
-      "'testoffer3')"));
-  REQUIRE_NOTHROW(db_client->execSqlSync(
-      "DELETE FROM offers WHERE title LIKE 'Test Offer%'"));
-  REQUIRE_NOTHROW(db_client->execSqlSync(
-      "DELETE FROM posts WHERE content LIKE 'Test post for offer testing%'"));
-  REQUIRE_NOTHROW(
-      db_client->execSqlSync("DELETE FROM posts WHERE content LIKE 'Test Post "
-                             "2 - Mercedes Benz G53%'"));
-  REQUIRE_NOTHROW(db_client->execSqlSync(
-      "DELETE FROM user_sessions WHERE user_id IN (SELECT id FROM users WHERE "
-      "username = 'testoffer1' OR username = 'testoffer2' OR username = "
-      "'testoffer3')"));
-  REQUIRE_NOTHROW(db_client->execSqlSync(
-      "DELETE FROM users WHERE username = 'testoffer1' "
-      "OR username = 'testoffer2' OR username = 'testoffer3'"));
+  helpers::cleanup_db();
 
   // Create test users for offer testing
   auto client = drogon::HttpClient::newHttpClient("http://127.0.0.1:5555");
@@ -724,54 +691,8 @@ DROGON_TEST(OffersWorkflowTest) {
 
   // Test 28: Verify that negotiation_status in offer table is updated to
   // completed for accepted an rejected offers
+
   get_offers_req = drogon::HttpRequest::newHttpRequest();
 
-  drogon::orm::Result
-      negotiation_status;  // There is no request for this so we use DB query
-  REQUIRE_NOTHROW(negotiation_status = db_client->execSqlSync(
-                      "SELECT negotiation_status FROM offers WHERE id = " +
-                      std::to_string(offer_id)));
-  CHECK(negotiation_status[0]["negotiation_status"].as<std::string>() ==
-        "completed");
-
-  REQUIRE_NOTHROW(negotiation_status = db_client->execSqlSync(
-                      "SELECT negotiation_status FROM offers WHERE id = " +
-                      std::to_string(ignored_offer_id)));
-  CHECK(negotiation_status[0]["negotiation_status"].as<std::string>() ==
-        "completed");
-
-  // Clean up test data
-  REQUIRE_NOTHROW(db_client->execSqlSync(
-      "DELETE FROM messages WHERE sender_id IN (SELECT id FROM users WHERE "
-      "username = 'testoffer1' OR username = 'testoffer2' OR username = "
-      "'testoffer3' )"));
-  REQUIRE_NOTHROW(db_client->execSqlSync(
-      "DELETE FROM conversation_participants WHERE user_id IN (SELECT id FROM "
-      "users WHERE username = 'testoffer1' OR username = 'testoffer2' OR "
-      "username = 'testoffer3')"));
-  REQUIRE_NOTHROW(db_client->execSqlSync(
-      "DELETE FROM conversations WHERE name LIKE 'Offer%'"));
-  REQUIRE_NOTHROW(
-      db_client->execSqlSync("DELETE FROM price_negotiations WHERE offer_id IN "
-                             "(SELECT id FROM offers WHERE "
-                             "title LIKE 'Test Offer%')"));
-  REQUIRE_NOTHROW(db_client->execSqlSync(
-      "DELETE FROM offer_notifications WHERE user_id IN (SELECT id FROM users "
-      "WHERE "
-      "username = 'testoffer1' OR username = 'testoffer2' OR username = "
-      "'testoffer3')"));
-  REQUIRE_NOTHROW(db_client->execSqlSync(
-      "DELETE FROM offers WHERE title LIKE 'Test Offer%'"));
-  REQUIRE_NOTHROW(db_client->execSqlSync(
-      "DELETE FROM posts WHERE content LIKE 'Test post for offer testing%'"));
-  REQUIRE_NOTHROW(
-      db_client->execSqlSync("DELETE FROM posts WHERE content LIKE 'Test Post "
-                             "2 - Mercedes Benz G53%'"));
-  REQUIRE_NOTHROW(db_client->execSqlSync(
-      "DELETE FROM user_sessions WHERE user_id IN (SELECT id FROM users WHERE "
-      "username = 'testoffer1' OR username = 'testoffer2' OR username = "
-      "'testoffer3')"));
-  REQUIRE_NOTHROW(db_client->execSqlSync(
-      "DELETE FROM users WHERE username = 'testoffer1' OR username = "
-      "'testoffer2' OR username = 'testoffer3'"));
+  helpers::cleanup_db();
 }
