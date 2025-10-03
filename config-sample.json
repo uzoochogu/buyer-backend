@@ -348,6 +348,6 @@
     "jwt_secret": "your_secure_random_production_secret",
     "minio_endpoint": "http://localhost:9000",
     "minio_access_key": "minioadmin",
-    "minio_secret_key": "minioadmin"
+    "minio_secret_key": "mypassword"
   }
 }

@@ -24,12 +24,12 @@ add_executable(${PROJECT_NAME}
 target_link_libraries(${PROJECT_NAME} PRIVATE Drogon::Drogon)
 
 # Custom target to configure tests with a fresh database
-# comment out if you are using docker compose !!!
-add_custom_target(configure_tests
-    COMMAND ${CMAKE_COMMAND} --build ${CMAKE_BINARY_DIR} --target setup_test_db
-    COMMAND ${CMAKE_COMMAND} --build ${CMAKE_BINARY_DIR} --target ${PROJECT_NAME}
-    COMMENT "Setting up test database and running tests"
-)
+# if not using docker and you have postgres installed locally !!!
+# add_custom_target(configure_tests
+#     COMMAND ${CMAKE_COMMAND} --build ${CMAKE_BINARY_DIR} --target setup_test_db
+#     COMMAND ${CMAKE_COMMAND} --build ${CMAKE_BINARY_DIR} --target ${PROJECT_NAME}
+#     COMMENT "Setting up test database and running tests"
+# )
 
 ParseAndAddDrogonTests(${PROJECT_NAME})
 

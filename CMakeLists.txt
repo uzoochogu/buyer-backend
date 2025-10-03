@@ -7,14 +7,14 @@ check_include_file_cxx(any HAS_ANY)
 check_include_file_cxx(string_view HAS_STRING_VIEW)
 check_include_file_cxx(coroutine HAS_COROUTINE)
 
-set(CMAKE_CXX_STANDARD 20)
+set(CMAKE_CXX_STANDARD 23)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
 add_executable(${PROJECT_NAME} main.cc)
 
 set_target_properties(${PROJECT_NAME} PROPERTIES
-    CXX_STANDARD 20
+    CXX_STANDARD 23
     CXX_STANDARD_REQUIRED ON
     CXX_EXTENSIONS OFF
     COMPILE_WARNING_AS_ERROR ON
@@ -41,6 +41,9 @@ find_package(jwt-cpp CONFIG REQUIRED)
 find_package(unofficial-argon2 CONFIG REQUIRED)
 find_package(aws-cpp-sdk-core REQUIRED)
 find_package(aws-cpp-sdk-s3 REQUIRED)
+find_package(unordered_dense CONFIG REQUIRED)
+find_package(glaze CONFIG REQUIRED)
+
 
 target_link_libraries(${PROJECT_NAME} PRIVATE Drogon::Drogon 
                                               jwt-cpp::jwt-cpp 
@@ -49,7 +52,9 @@ target_link_libraries(${PROJECT_NAME} PRIVATE Drogon::Drogon
 #                                              redis++::redis++
                                               Boost::uuid
                                               aws-cpp-sdk-core
-                                              aws-cpp-sdk-s3               
+                                              aws-cpp-sdk-s3
+                                              unordered_dense::unordered_dense
+                                              glaze::glaze                
                       )
 
 # ##############################################################################
@@ -94,19 +99,23 @@ target_sources(${PROJECT_NAME}
 # ##############################################################################
 
 # Database management for tests
-# Remove if using docker !!!
-if(WIN32)
-    add_custom_target(setup_test_db
-        COMMAND ${CMAKE_CURRENT_SOURCE_DIR}/scripts/setup_test_db.bat
-        WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
-        COMMENT "Setting up test database"
-    )
-else()
-    add_custom_target(setup_test_db
-        COMMAND ${CMAKE_CURRENT_SOURCE_DIR}/scripts/setup_test_db.sh
-        WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
-        COMMENT "Setting up test database"
-    )
-endif()
+# Add if not using docker and Postgres is installed locally !!!
+# if(WIN32)
+#     add_custom_target(setup_test_db
+#         COMMAND ${CMAKE_CURRENT_SOURCE_DIR}/scripts/setup_test_db.bat
+#         WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
+#         COMMENT "Setting up test database"
+#     )
+# else()
+#     add_custom_target(setup_test_db
+#         COMMAND ${CMAKE_CURRENT_SOURCE_DIR}/scripts/setup_test_db.sh
+#         WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
+#         COMMENT "Setting up test database"
+#     )
+# endif()
 
-add_subdirectory(test)
+option(ENABLE_TESTS "Enable building tests" ON)
+
+if (ENABLE_TESTS)
+    add_subdirectory(test)
+endif()
