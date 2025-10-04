@@ -452,7 +452,7 @@ drogon::Task<> Authentication::register_user(
   auto parse_error = utilities::strict_read_json(register_req, req->getBody());
 
   if (parse_error || register_req.username.empty() ||
-      utilities::is_email_valid(register_req.email) ||
+      !utilities::is_email_valid(register_req.email) ||
       register_req.password.empty()) {
     SimpleError ret{.error = "Username, email, and password are required"};
     auto resp =

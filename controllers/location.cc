@@ -15,8 +15,11 @@
 #include <format>
 
 #include "../utilities/conversion.hpp"
+#include "../utilities/json_manipulation.hpp"
+#include "common_req_n_resp.hpp"
 
 using drogon::app;
+using drogon::CT_APPLICATION_JSON;
 using drogon::HttpRequestPtr;
 using drogon::HttpResponse;
 using drogon::HttpResponsePtr;
@@ -26,28 +29,50 @@ using drogon::orm::DrogonDbException;
 
 using api::v1::LocationController;
 
+struct AddLocationRequest {
+  double latitude;
+  double longitude;
+  std::optional<double> gps_accuracy{100.0};
+};
+
+struct AddLocationResponse {
+  std::string status;
+  std::string device_id;
+};
+
+struct ClusterData {
+  std::string id;
+  int point_count;
+  std::string centroid;  // ST_AsGeoJSON returns a string
+};
+
+struct LocationPointResponse {
+  double latitude;
+  double longitude;
+  double accuracy;
+  std::string user_id;
+  std::string device_id;
+  std::string cluster_id;
+  double distance;
+};
+
 drogon::Task<> LocationController::add_location(
     const HttpRequestPtr req,
     std::function<void(const HttpResponsePtr&)> callback) {
   try {
-    auto json = req->getJsonObject();
-    if (!json || json->empty() || !(*json).isMember("latitude") ||
-        !(*json).isMember("longitude") || !(*json)["latitude"].isDouble() ||
-        !(*json)["longitude"].isDouble()) {
+    AddLocationRequest add_req;
+    auto parse_error = utilities::strict_read_json(add_req, req->getBody());
+
+    if (parse_error || (add_req.latitude == 0.0 && add_req.longitude == 0.0)) {
       LOG_ERROR << "Invalid longitude or latitude, note that they are required";
-      Json::Value error;
-      error["error"] =
-          "Invalid longitude or latitude, note that they are required";
-      auto resp = HttpResponse::newHttpJsonResponse(error);
-      resp->setStatusCode(k400BadRequest);
+      SimpleError error{.error =
+                            "Invalid longitude or latitude, note that they are "
+                            "required"};
+      auto resp =
+          HttpResponse::newHttpResponse(k400BadRequest, CT_APPLICATION_JSON);
+      resp->setBody(glz::write_json(error).value_or(""));
       callback(resp);
       co_return;
-    }
-
-    if (!(*json).isMember("gps_accuracy") ||
-        !(*json)["gps_accuracy"].isDouble()) {
-      (*json)["gps_accuracy"] = 100.0;
-      LOG_INFO << "gps_accuracy not provided, using default value of 100.0";
     }
 
     std::string user_id =
@@ -66,24 +91,21 @@ drogon::Task<> LocationController::add_location(
         "accuracy = EXCLUDED.accuracy, geom = "
         "ST_SetSRID(ST_MakePoint(EXCLUDED.longitude, EXCLUDED.latitude), "
         "4326), device_id = EXCLUDED.device_id",
-        std::stoi(user_id), (*json)["latitude"].asDouble(),
-        (*json)["longitude"].asDouble(), (*json)["gps_accuracy"].asDouble(),
-        device_id
-        //    (*json)["device_id"].asString()  // not currently used
-    );
+        std::stoi(user_id), add_req.latitude, add_req.longitude,
+        add_req.gps_accuracy.value_or(100.0), device_id);
 
-    Json::Value ret;
-    ret["status"] = "success";
-    ret["device_id"] = device_id;
-    auto resp = HttpResponse::newHttpJsonResponse(ret);
+    AddLocationResponse response{.status = "success", .device_id = device_id};
+    auto resp =
+        HttpResponse::newHttpResponse(drogon::k200OK, CT_APPLICATION_JSON);
+    resp->setBody(glz::write_json(response).value_or(""));
     callback(resp);
   } catch (const DrogonDbException& e) {
-    Json::Value error;
+    SimpleError error{
+        .error = std::format("Failed to save location: {}", e.base().what())};
     LOG_ERROR << "Failed to create error: " << e.base().what();
-    error["error"] =
-        std::format("Failed to save location:  {}", e.base().what());
-    auto resp = HttpResponse::newHttpJsonResponse(error);
-    resp->setStatusCode(k500InternalServerError);
+    auto resp = HttpResponse::newHttpResponse(k500InternalServerError,
+                                              CT_APPLICATION_JSON);
+    resp->setBody(glz::write_json(error).value_or(""));
     callback(resp);
   }
   co_return;
@@ -93,7 +115,6 @@ drogon::Task<> LocationController::add_location(
 drogon::Task<> LocationController::get_clusters(
     const HttpRequestPtr req,
     std::function<void(const HttpResponsePtr&)> callback) {
-  // Parse offset query param
   int64_t offset = 0;
   auto offset_str = req->getParameter("offset");
   if (!offset_str.empty()) {
@@ -110,27 +131,25 @@ drogon::Task<> LocationController::get_clusters(
         "GROUP BY cluster_id OFFSET $1 LIMIT 15",
         offset);
 
-    Json::Value clusters(Json::arrayValue);
+    std::vector<ClusterData> clusters_data;
+    clusters_data.reserve(result.size());
     for (const auto& row : result) {
-      Json::Value cluster;
-      cluster["id"] = row["cluster_id"].as<std::string>();
-      cluster["point_count"] = row["point_count"].as<int>();
-
-      Json::Value centroid;
-      Json::Reader().parse(row["centroid"].as<std::string>(), centroid);
-      cluster["centroid"] = centroid;
-
-      clusters.append(cluster);
+      clusters_data.push_back(
+          ClusterData{.id = row["cluster_id"].as<std::string>(),
+                      .point_count = row["point_count"].as<int>(),
+                      .centroid = row["centroid"].as<std::string>()});
     }
 
-    auto resp = HttpResponse::newHttpJsonResponse(clusters);
+    auto resp =
+        HttpResponse::newHttpResponse(drogon::k200OK, CT_APPLICATION_JSON);
+    resp->setBody(glz::write_json(clusters_data).value_or(""));
     callback(resp);
   } catch (const DrogonDbException& e) {
     LOG_ERROR << "Database error getting clusters: " << e.base().what();
-    Json::Value error;
-    error["error"] = e.base().what();
-    auto resp = drogon::HttpResponse::newHttpJsonResponse(error);
-    resp->setStatusCode(drogon::k500InternalServerError);
+    SimpleError error{.error = e.base().what()};
+    auto resp = drogon::HttpResponse::newHttpResponse(
+        drogon::k500InternalServerError, CT_APPLICATION_JSON);
+    resp->setBody(glz::write_json(error).value_or(""));
     callback(resp);
   }
   co_return;
@@ -141,13 +160,12 @@ drogon::Task<> LocationController::find_nearby(
     const HttpRequestPtr req,
     std::function<void(const HttpResponsePtr&)> callback) {
   try {
-    auto lat = req->getParameter("lat");
-    auto lon = req->getParameter("lon");
-    auto radius = req->getParameter("radius");
+    auto lat_str = req->getParameter("lat");
+    auto lon_str = req->getParameter("lon");
+    auto radius_str = req->getParameter("radius");
 
-    if (radius.empty()) radius = "1000";  // Default 1km radius
+    if (radius_str.empty()) radius_str = "1000";  // Default 1km radius
 
-    // Parse offset query param
     int64_t offset = 0;
     auto offset_str = req->getParameter("offset");
     if (!offset_str.empty()) {
@@ -155,14 +173,19 @@ drogon::Task<> LocationController::find_nearby(
       if (offset < 0) offset = 0;
     }
 
-    if (lat.empty() || lon.empty()) {
-      Json::Value error;
-      error["error"] = "Missing lat/lon parameters";
-      auto resp = HttpResponse::newHttpJsonResponse(error);
-      resp->setStatusCode(k400BadRequest);
+    if (lat_str.empty() || lon_str.empty()) {
+      SimpleError error{.error = "Missing lat/lon parameters"};
+      auto resp =
+          HttpResponse::newHttpResponse(k400BadRequest, CT_APPLICATION_JSON);
+      resp->setBody(glz::write_json(error).value_or(""));
       callback(resp);
       co_return;
     }
+
+    double lat = convert::string_to_number<double>(lat_str).value_or(0.0);
+    double lon = convert::string_to_number<double>(lon_str).value_or(0.0);
+    double radius =
+        convert::string_to_number<double>(radius_str).value_or(1000.0);
 
     auto client = app().getDbClient();
     auto result = co_await client->execSqlCoro(
@@ -173,29 +196,31 @@ drogon::Task<> LocationController::find_nearby(
         "WHERE ST_DWithin(geom, ST_SetSRID(ST_MakePoint($2, $1), "
         "4326)::geography, $3) "
         "ORDER BY distance OFFSET $4 LIMIT 15",
-        std::stod(lat), std::stod(lon), std::stod(radius), offset);
+        lat, lon, radius, offset);
 
-    Json::Value nearby_points(Json::arrayValue);
+    std::vector<LocationPointResponse> nearby_points;
+    nearby_points.reserve(result.size());
     for (const auto& row : result) {
-      Json::Value point;
-      point["latitude"] = row["latitude"].as<double>();
-      point["longitude"] = row["longitude"].as<double>();
-      point["accuracy"] = row["accuracy"].as<double>();
-      point["user_id"] = row["user_id"].as<std::string>();
-      point["device_id"] = row["device_id"].as<std::string>();
-      point["cluster_id"] = row["cluster_id"].as<std::string>();
-      point["distance"] = row["distance"].as<double>();
-      nearby_points.append(point);
+      nearby_points.push_back(LocationPointResponse{
+          .latitude = row["latitude"].as<double>(),
+          .longitude = row["longitude"].as<double>(),
+          .accuracy = row["accuracy"].as<double>(),
+          .user_id = row["user_id"].as<std::string>(),
+          .device_id = row["device_id"].as<std::string>(),
+          .cluster_id = row["cluster_id"].as<std::string>(),
+          .distance = row["distance"].as<double>()});
     }
 
-    auto resp = HttpResponse::newHttpJsonResponse(nearby_points);
+    auto resp =
+        HttpResponse::newHttpResponse(drogon::k200OK, CT_APPLICATION_JSON);
+    resp->setBody(glz::write_json(nearby_points).value_or(""));
     callback(resp);
   } catch (const DrogonDbException& e) {
     LOG_ERROR << "Database error finding nearby cluster : " << e.base().what();
-    Json::Value error;
-    error["error"] = e.base().what();
-    auto resp = drogon::HttpResponse::newHttpJsonResponse(error);
-    resp->setStatusCode(drogon::k500InternalServerError);
+    SimpleError error{.error = e.base().what()};
+    auto resp = drogon::HttpResponse::newHttpResponse(
+        drogon::k500InternalServerError, CT_APPLICATION_JSON);
+    resp->setBody(glz::write_json(error).value_or(""));
     callback(resp);
   }
   co_return;
@@ -204,12 +229,11 @@ drogon::Task<> LocationController::find_nearby(
 drogon::Task<> LocationController::recluster(
     const HttpRequestPtr req,
     std::function<void(const HttpResponsePtr&)> callback) {
-  // Parse epsilon query param
   double epsilon = 1000.0;  // meters
   try {
     auto epsilon_str = req->getParameter("epsilon");
     if (!epsilon_str.empty()) {
-      epsilon = std::stod(epsilon_str);
+      epsilon = convert::string_to_number<double>(epsilon_str).value_or(1000.0);
       if (epsilon < 0 || epsilon > 10'000'000) epsilon = 1000.0;
     }
   } catch (...) {
@@ -221,7 +245,7 @@ drogon::Task<> LocationController::recluster(
     int min_points = 2;
 
     auto client = app().getDbClient();
-    // Use a CTE to assign cluster numbers using PostGIS DBSCAN
+    // CTE: Assign cluster numbers using PostGIS DBSCAN
     // and update the locations table with new cluster_ids
     auto result = co_await client->execSqlCoro(R"(
   WITH transformed AS (
@@ -244,14 +268,16 @@ drogon::Task<> LocationController::recluster(
 )",
                                                epsilon, min_points);
 
-    Json::Value ret;
-    ret["status"] = "clustering completed";
-    auto resp = HttpResponse::newHttpJsonResponse(ret);
+    SimpleStatus response{.status = "clustering completed"};
+    auto resp =
+        HttpResponse::newHttpResponse(drogon::k200OK, CT_APPLICATION_JSON);
+    resp->setBody(glz::write_json(response).value_or(""));
     callback(resp);
   } catch (const DrogonDbException& e) {
-    auto resp = HttpResponse::newHttpResponse();
-    resp->setStatusCode(k500InternalServerError);
-    resp->setBody(e.base().what());
+    auto resp = HttpResponse::newHttpResponse(k500InternalServerError,
+                                              CT_APPLICATION_JSON);
+    resp->setBody(
+        glz::write_json(SimpleError{.error = e.base().what()}).value_or(""));
     callback(resp);
   }
   co_return;

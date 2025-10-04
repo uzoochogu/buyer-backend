@@ -36,7 +36,6 @@ drogon::Task<> Search::search(
   std::size_t page = 1;
   std::size_t pageSize = 20;
 
-  // Parse pagination parameters safely
   if (req->getParameter("page").empty() == false) {
     page = std::max(
         1, convert::string_to_int(req->getParameter("page")).value_or(1));
@@ -65,7 +64,6 @@ drogon::Task<> Search::search(
 
   auto db = app().getDbClient();
   try {
-    // Use parameterized queries to prevent SQL injection
     auto orders_result = co_await db->execSqlCoro(
         "SELECT * FROM orders WHERE CAST(id AS TEXT) ILIKE $1 OR status ILIKE "
         "$1 ORDER BY id DESC LIMIT $2 OFFSET $3",

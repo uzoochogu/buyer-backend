@@ -3,25 +3,6 @@
 #include <drogon/HttpController.h>
 #include <drogon/orm/DbClient.h>
 
-struct LocationPoint {
-  double latitude;
-  double longitude;
-  double accuracy;
-  std::string user_id;
-  std::string device_id;
-  std::string cluster_id;
-  Json::Value to_json() const {
-    Json::Value json;
-    json["latitude"] = latitude;
-    json["longitude"] = longitude;
-    json["accuracy"] = accuracy;
-    json["user_id"] = user_id;
-    json["device_id"] = device_id;
-    json["cluster_id"] = cluster_id;
-    return json;
-  }
-};
-
 namespace api {
 namespace v1 {
 
