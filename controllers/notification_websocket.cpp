@@ -1,12 +1,18 @@
-// #include "../utilities/uuid_generator.hpp"
 #include "notification_websocket.hpp"
 
 #include "../services/service_manager.hpp"
+#include "../utilities/json_manipulation.hpp"
+#include "common_req_n_resp.hpp"
 
 using drogon::app;
 using drogon::HttpRequestPtr;
 using drogon::WebSocketConnectionPtr;
 using drogon::WebSocketMessageType;
+
+struct WelcomeMessage {
+  std::string type;
+  std::string message;
+};
 
 void NotificationWebSocket::handleNewMessage(
     const WebSocketConnectionPtr& wsConnPtr, std::string&& message,
@@ -17,7 +23,24 @@ void NotificationWebSocket::handleNewMessage(
     case WebSocketMessageType::Text:
       if (message.empty()) {
         LOG_WARN << "Received empty message from user " << *connId;
+        SimpleError error{.error = "Received empty message"};
+        wsConnPtr->send(glz::write_json(error).value_or(""));
       }
+      // else if (message_needs_parsing) {
+      //   // For incoming messages, if they need to be parsed, define a struct
+      //   // like `IncomingWebSocketMessage` and use
+      //   `utilities::strict_read_json`
+      //   // Example:
+      //   // IncomingWebSocketMessage incoming_msg;
+      //   // auto parse_error = utilities::strict_read_json(incoming_msg,
+      //   message);
+      //   // if (parse_error) {
+      //   //   SimpleError error{.error = "Invalid message format"};
+      //   //   wsConnPtr->send(glz::write_json(error).value_or(""));
+      //   //   return;
+      //   // }
+      //   // Process incoming_msg...
+      // }
       break;
     case WebSocketMessageType::Binary:
       break;
@@ -64,12 +87,9 @@ void NotificationWebSocket::handleNewConnection(
 
   LOG_INFO << "WebSocket connected for user: " << current_user_id;
 
-  // Send welcome message
-  Json::Value welcome;
-  welcome["type"] = "connected";
-  welcome["message"] = "Connected to notification service";
-  Json::StreamWriterBuilder builder;
-  wsConnPtr->send(Json::writeString(builder, welcome));
+  WelcomeMessage welcome{.type = "connected",
+                         .message = "Connected to notification service"};
+  wsConnPtr->send(glz::write_json(welcome).value_or(""));
 }
 
 void NotificationWebSocket::handleConnectionClosed(

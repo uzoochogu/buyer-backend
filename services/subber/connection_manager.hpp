@@ -1,6 +1,7 @@
 #ifndef CONNECTION_MANAGER_HPP
 #define CONNECTION_MANAGER_HPP
 
+#include <ankerl/unordered_dense.h>
 #include <drogon/WebSocketConnection.h>
 #include <drogon/drogon.h>
 
@@ -9,6 +10,10 @@
 #include <string>
 #include <unordered_map>
 #include <unordered_set>
+
+#include "../../controllers/common_req_n_resp.hpp"
+#include "../../utilities/json_manipulation.hpp"
+
 
 // enum class notification_type : uint8_t {}
 
@@ -81,47 +86,28 @@ inline void store_user_subscription(const std::string &user_id,
   }
 }
 
-inline void store_notification_in_db(std::string user_id,
+inline void store_notification_in_db(const std::string &user_id,
                                      const std::string &message) {
-  // Message should be a JSON object following the schema at minimum:
-  // {
-  //     "type": notification_type, see notification_type enum
-  //     "id": Relevant id for this message, notifications related to a post -
-  //     post_id,
-  //           offers- offer_id, messages - message_id etc
-  //     "message": message_content,
-  //     "modified_at": timestamp (may not be used)
-  // }
+  NotificationMessage notification;
+  auto parse_error = utilities::strict_read_json(notification, message);
 
-  // parse  message into json
-  Json::Value notification;
-
-  Json::CharReaderBuilder builder;
-  std::string errors;
-  std::istringstream data_stream(message);
-  if (!Json::parseFromStream(builder, data_stream, &notification, &errors)) {
-    LOG_ERROR << "Failed to parse message as JSON: " << errors;
+  if (parse_error) {
+    LOG_ERROR << "Failed to parse message as NotificationMessage using glaze";
     return;
   }
 
   try {
     auto db = drogon::app().getDbClient();
-    if (notification.isMember("type") && notification.isMember("message") &&
-        notification["type"].isString() && notification["message"].isString()) {
-      db->execSqlAsync(
-          "INSERT INTO notifications (user_id, type, message) VALUES ($1, $2, "
-          "$3)",
-          [](const drogon::orm::Result &) {
-            LOG_INFO << "Notification stored in database";
-          },
-          [](const drogon::orm::DrogonDbException &e) {
-            LOG_ERROR << "Failed to store notification: " << e.base().what();
-          },
-          user_id, notification["type"].asString(),
-          notification["message"].asString());
-    } else {
-      LOG_ERROR << "Invalid notification format, saving failed";
-    }
+    db->execSqlAsync(
+        "INSERT INTO notifications (user_id, type, message) VALUES ($1, $2, "
+        "$3)",
+        [](const drogon::orm::Result &) {
+          LOG_INFO << "Notification stored in database";
+        },
+        [](const drogon::orm::DrogonDbException &e) {
+          LOG_ERROR << "Failed to store notification: " << e.base().what();
+        },
+        user_id, notification.type, notification.message);
   } catch (...) {
     LOG_ERROR << "Failed to store notification\n";
   }
@@ -222,9 +208,12 @@ class ConnectionManager {
   }
 
  private:
-  std::unordered_map<std::string, std::list<drogon::WebSocketConnectionPtr>>
+  ankerl::unordered_dense::map<std::string,
+                               std::list<drogon::WebSocketConnectionPtr>>
       connections_;
-  std::unordered_map<std::string, std::unordered_set<std::string>> subscribers_;
+  ankerl::unordered_dense::map<std::string,
+                               ankerl::unordered_dense::set<std::string>>
+      subscribers_;
   std::mutex mutex_;
 };
 

@@ -12,9 +12,10 @@
 // Redis PubSub option: noticed instability with large number of subscriptions
 // #include "./subber/redis_pub_manager.hpp"
 // #include "./subber/redis_sub_manager.hpp"
-
+namespace service {
+inline constexpr std::string_view BUCKET_NAME = "media";
 inline constexpr std::uint32_t MAX_MEDIA_SIZE = 5U;
-
+}  // namespace service
 class ServiceManager {
  public:
   static ServiceManager& get_instance() {
