@@ -5,9 +5,11 @@
 #include <jwt-cpp/jwt.h>
 #include <jwt-cpp/traits/open-source-parsers-jsoncpp/traits.h>
 
+#include <glaze/glaze.hpp>
 #include <string>
 
 #include "../config/config.hpp"
+#include "../controllers/common_req_n_resp.hpp"
 
 using drogon::HttpResponse;
 
@@ -19,7 +21,7 @@ class WebSocketAuthMiddleware
   void invoke(const drogon::HttpRequestPtr &req,
               drogon::MiddlewareNextCallback &&nextCb,
               drogon::MiddlewareCallback &&mcb) override {
-    // Skip OPTIONS requests (for CORS)
+    // CORS
     if (req->getMethod() == drogon::HttpMethod::Options) {
       nextCb(std::move(mcb));
       return;
@@ -38,18 +40,17 @@ class WebSocketAuthMiddleware
 
       if (token.empty()) {
         LOG_ERROR << "WebSocket connection rejected: No token provided";
-        auto resp = HttpResponse::newHttpJsonResponse(
-            {{"error", "Unauthorized: No token provided"}});
-        resp->setStatusCode(drogon::k401Unauthorized);
+        auto resp = HttpResponse::newHttpResponse(drogon::k401Unauthorized,
+                                                  drogon::CT_APPLICATION_JSON);
+        SimpleError err{.error = "Unauthorized: No valid token provided"};
+        resp->setBody(glz::write_json(err).value_or(""));
         mcb(resp);
         return;
       }
 
       using traits = jwt::traits::open_source_parsers_jsoncpp;
-      // Verify the token
       auto decoded = jwt::decode<traits>(token);
 
-      // Verify signature and expiration
       auto verifier =
           jwt::verify<traits>()
               .allow_algorithm(jwt::algorithm::hs256{config::JWT_SECRET})
@@ -57,27 +58,20 @@ class WebSocketAuthMiddleware
 
       verifier.verify(decoded);
 
-      // Extract user ID from token and add to request attributes for later use
-      // The user_id is stored as a string in the JWT, so extract it as a string
+      verifier.verify(decoded);
+      auto claim = decoded.get_payload_claim("user_id");
+      auto payload_type = claim.get_type();
       std::string user_id;
-      try {
-        // First try as string
-        user_id = decoded.get_payload_claim("user_id").as_string();
-      } catch (...) {
-        try {
-          // If that fails, try as integer and convert to string
-          user_id =
-              std::to_string(decoded.get_payload_claim("user_id").as_integer());
-        } catch (const std::exception &e) {
-          LOG_ERROR << "Failed to extract user_id from token: " << e.what();
-          throw;
-        }
-      }
+      if (payload_type == jwt::json::type::integer ||
+          payload_type == jwt::json::type::number)
+        user_id = std::to_string(static_cast<int>(claim.as_number()));
+      else if (payload_type == jwt::json::type::string)
+        user_id = claim.as_string();
+      else
+        throw std::exception("invalid type");
 
-      // Pass user_id through request attributes
       req->getAttributes()->insert("current_user_id", user_id);
 
-      // Token is valid, proceed to the next middleware/controller
       nextCb(std::move(mcb));
     } /* catch (const jwt::error::token_verification_exception& e) {
       if(e.code() == jwt::error::token_verification_error::token_expired) {
@@ -91,9 +85,10 @@ class WebSocketAuthMiddleware
     }  */
     catch (const std::exception &e) {
       LOG_ERROR << "Websocket auth error: " << e.what();
-      auto resp = HttpResponse::newHttpJsonResponse(
-          {{"error", "Unauthorized: Invalid token"}});
-      resp->setStatusCode(drogon::k401Unauthorized);
+      auto resp = HttpResponse::newHttpResponse(drogon::k401Unauthorized,
+                                                drogon::CT_APPLICATION_JSON);
+      SimpleError err{.error = "Unauthorized: Invalid token"};
+      resp->setBody(glz::write_json(err).value_or(""));
       mcb(resp);
     }
   }
