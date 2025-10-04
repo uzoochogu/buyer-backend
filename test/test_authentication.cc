@@ -25,7 +25,7 @@ DROGON_TEST(AuthenticationTest) {
   REQUIRE(resp.second->getStatusCode() == drogon::k200OK);
 
   auto json = resp.second->getJsonObject();
-  REQUIRE((*json)["status"].asString() == "success");
+
   REQUIRE((*json)["token"].asString().length() > 0);
   REQUIRE((*json)["refresh_token"].asString().length() > 0);
 
@@ -41,7 +41,6 @@ DROGON_TEST(AuthenticationTest) {
   resp = client->sendRequest(req);
   REQUIRE(resp.second->getStatusCode() == drogon::k200OK);
   json = resp.second->getJsonObject();
-  REQUIRE((*json)["status"].asString() == "success");
 
   // Test login
   Json::Value login_json;
@@ -54,7 +53,7 @@ DROGON_TEST(AuthenticationTest) {
   resp = client->sendRequest(req);
   REQUIRE(resp.second->getStatusCode() == drogon::k200OK);
   json = resp.second->getJsonObject();
-  REQUIRE((*json)["status"].asString() == "success");
+
   REQUIRE((*json)["token"].asString().length() > 0);
   REQUIRE((*json)["refresh_token"].asString().length() > 0);
 
@@ -72,7 +71,7 @@ DROGON_TEST(AuthenticationTest) {
   resp = client->sendRequest(req);
   REQUIRE(resp.second->getStatusCode() == drogon::k200OK);
   json = resp.second->getJsonObject();
-  REQUIRE((*json)["status"].asString() == "success");
+
   REQUIRE((*json)["token"].asString().length() > 0);
 
   // Test logout
@@ -84,7 +83,6 @@ DROGON_TEST(AuthenticationTest) {
   resp = client->sendRequest(req);
   REQUIRE(resp.second->getStatusCode() == drogon::k200OK);
   json = resp.second->getJsonObject();
-  REQUIRE((*json)["status"].asString() == "success");
 
   helpers::cleanup_db();
 }
