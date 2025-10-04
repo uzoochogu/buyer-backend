@@ -31,13 +31,15 @@ Install Postgres on your test machine, either [locally](https://www.postgresql.o
 
 Below are some of the dependencies that are used in the project:
 
-- [drogon](https://github.com/drogonframework/drogon) - with some submodules and sub-dependencies like JsonCpp.
-- [argon2](https://github.com/P-H-C/phc-winner-argon2.git)
-- [jwt-cpp](https://github.com/Thalhammer/jwt-cpp)
-- [cppzmq](https://github.com/zeromq/cppzmq) - Pub/Sub, Notification system.
-- ~~[redis-plus-plus](https://github.com/sewenew/redis-plus-plus)~~ - Not currently used or but code stub is present.
-- [boost-uuid](https://www.boost.org/libs/uuid) - Faster UUID than Drogon UUID utility.
-- [aws-sdk-cpp](https://github.com/aws/aws-sdk-cpp) - Only using S3 component for S3 compatible Minio Service.
+* [drogon](https://github.com/drogonframework/drogon) - with some submodules and sub-dependencies like JsonCpp.
+* [argon2](https://github.com/P-H-C/phc-winner-argon2.git)
+* [jwt-cpp](https://github.com/Thalhammer/jwt-cpp)
+* [cppzmq](https://github.com/zeromq/cppzmq) - Pub/Sub, Notification system.
+* ~~[redis-plus-plus](https://github.com/sewenew/redis-plus-plus)~~ - Not currently used or but code stub is present.
+* [boost-uuid](https://www.boost.org/libs/uuid) - Faster UUID than Drogon UUID utility.
+* [aws-sdk-cpp](https://github.com/aws/aws-sdk-cpp) - Only using S3 component for S3 compatible Minio Service.
+* [unordered-dense](https://github.com/martinus/unordered_dense) - Extremely efficient and fast hash map.
+* [Glaze](https://github.com/stephenberry/glaze) - Super fast JSON parsing and serializing with reflection support. (~2.1X faster than JsonCpp)
 
 Installing using vcpkg:
 
@@ -59,11 +61,13 @@ vcpkg install
 ./vcpkg install redis-plus-plus[async,tls,cxx17]:triplet_name  # currently not used, so can be ignored.
 ./vcpkg install boost-uuid:triplet_name
 ./vcpkg install aws-sdk-cpp[s3]:triplet_name
+./vcpkg install unordered-dense:triplet_name
+./vcpkg install glaze:triplet_name
 ```
 
 More information on setting up the drogon-ctl tool can be found [in this guide](https://github.com/drogonframework/drogon/wiki/ENG-02-Installation#Drogon-Installation)
 
-### Compilation
+## Compilation
 
 ```bash
 # Configure CMake
@@ -82,12 +86,46 @@ cmake --build build --config Release --parallel
 cmake --build build --config Release --parallel --clean-first
 ```
 
+## Docker Compose
+
+A [`docker-compose.yml`](./docker-compose.yml) file is provided for running the postgres database, media server services and optionally the main application (uncomment it to enable).
+You can compose up and down the containers using the following commands:
+
+```bash
+# Compose up
+docker compose up -d
+
+# Compose down
+docker compose down
+
+# subsequent runs can be started and stopped using
+docker compose start
+
+docker compose stop
+```
+
+### Media Server
+
+Minio Object Store is used for storing and serving media files. It has an AWS S3 compatible API.
+It is managed in this project using Docker.
+
+#### Credentials
+
+```txt
+MINIO_ROOT_USER=minioadmin
+MINIO_ROOT_PASSWORD=mypassword
+```
+
+If you modify the credentials, make sure to update your created `config.json` and `test_config-sample.json` files.
+
 ### Running the Backend
 
-Modify the configuration files to setup correct backend runtime environment.
+1. Modify the configuration files to setup correct backend runtime environment.
 Create `test_config.json` and `config.json` from the provided sample files: [`config-sample.json`](./config-sample.json) and [`test_config-sample`](./test_config-sample.json).
-
 Fill in the correct details especially the database connection details.
+
+2. Startup the database and media server using docker compose. (You can configure postgres manually if you prefer).
+3. Run application
 
 ```bash
 $ ./buyer-backend.exe --help
@@ -131,15 +169,20 @@ Integration tests using the Drogon built-in test framework.
 
 ### Configure Tests
 
-This can be done once, or whenever the test configuration changes.
+#### Integration tests
 
-Create `setup_test_db.bat` and `setup_test_db.sh` from the provided sample files:  [`setup_test_db-sample.bat`](./scripts/setup_test_db-sample.bat) and [`setup_test_db-sample.sh`](./scripts/setup_test_db-sample.sh).
+Integration tests require the main application to be running and uses services in [`docker-compose.test.yml`](./docker-compose.test.yml).
+Docker automatically create and seeds the DB with provided migration and seed files.
 
-Fill in the correct database connection details.
+> If you are managing Postgres manually, you can do the following to setup the test DB:
+> (Should be done whenever the test configuration changes.)
+> Create `setup_test_db.bat` and `setup_test_db.sh` from the provided sample files [`setup_test_db-sample.bat`](./scripts/setup_test_db-sample.bat) and [`setup_test_db-sample.sh`](./scripts/setup_test_db-sample.sh).
 
-```bash
-cmake --build build --target configure_tests
-```
+> Fill in the correct database connection details.
+
+> ```bash
+> cmake --build build --target configure_tests
+>```
 
 ### Build Tests
 
@@ -154,6 +197,9 @@ cmake --build build --config Debug --target buyer_backend_test
 ### Run Tests
 
 ```bash
+# Setup test docker compose
+docker compose -f docker-compose.test.yml up -d
+
 # Run main application
 ./buyer-backend --test-mode
 
@@ -173,22 +219,25 @@ ctest -C Release -R ChatsTest
 
 # This runs a specific test through the test executable
 ./buyer_backend_test -r ChatsTest
+
+# compose down (remove any associated volume)
+docker compose -f docker-compose.test.yml down -v
 ```
 
 ### Notes for Integration testing
 
-1. Ensure that there no active connection to the PostgreSQL DB before configuring tests. This can cause errors in the setup scripts
-2. Run main application in test mode in separate terminal before running integration tests or else integration tests segfaults.
+1. Run main application in test mode in separate terminal before running integration tests or else integration tests segfaults.
 
    ```bash
-   ./buyer-backend --test-mode 
+   ./buyer-backend --test
    # or
    ./buyer-backend -t
    ```
 
    The test executable makes requests processed by the main application server. Running main server in test mode ensures that it is connected to the correct test database.
+2. If managing postgres manually, ensure that there no active connection to the PostgreSQL DB before configuring tests. This can cause errors in the setup scripts
 
-## Database Management
+## Manual Database Management (Optional) - *Ignore if using Docker*
 
 ### Creating Database
 
@@ -224,42 +273,9 @@ psql -U postgres -d agentbackend -f seeds/001_complete_seed_data.sql
 psql -U postgres -d buyer_app_test -f seeds/001_complete_seed_data.sql
 ```
 
-## Media Server
+> If you are managing postgres manually, you can uncomment the custom targets for setting up the test DB in the [*CMakeLists.txt*](./CMakeLists.txt) and  [*test/CMakeLists.txt*](./test/CMakeLists.txt).
 
-Minio Object Store is used for storing and serving media files. It has an AWS S3 compatible API.
 
-### Installation
-
-```bash
-# Install Minio
-docker run --name minio-media-server -p 9000:9000 -p 9001:9001 -v /c/dev/media_store:/data -e "MINIO_ROOT_USER=minioadmin" -e "MINIO_ROOT_PASSWORD=password" minio/minio server /data --console-address ":9001"
-```
-
-Replace `-v /c/dev/media_store:/data` with the path to the media store directory on your machine for persistent storage.
-If you modify the credentials, make sure to update your created `config.json` and `test_config-sample.json` files.
-
-## Using Docker Compose (Experimental)
-
-A [`docker-compose.yml`](./docker-compose.yml) file is provided for running the postgres database and media server services and optionally, the main application (uncomment it to enable).
-
-> If you are using docker compose, you can remove the custom targets for setting up the test DB.
-
-You can compose up and down the containers using the following commands:
-
-```bash
-# Compose up
-docker compose up -d
-
-# Compose down
-docker compose down
-
-# subsequent runs can be started and stopped using
-docker compose start
-
-docker compose stop
-```
-
-> Note that this is still experimental and may not work as expected.
 
 ## Debugging tips
 
@@ -271,11 +287,11 @@ docker compose stop
 
 * Try to initialize the Json values as much as possible. Especially Array responses.
 
-- Using the `["key"]` accessor in JsonCpp default constructs that field if it doesn't exists, prefer `.isMember("key")` to check for membership.
+* Using the `["key"]` accessor in JsonCpp default constructs that field if it doesn't exists, prefer `.isMember("key")` to check for membership.
 
 * If you want to inspect the Database after a test run, remove the teardown delete queries, recompile and rerun tests. This way you have access to it after a run for more better investigations.
 
-* Use Drogon LOG_INFO and LOG_ERROR macros for logging. For Json responses this helps:
+* Use Drogon LOG_INFO and LOG_ERROR macros for logging. For JsonCpp Json responses this helps:
 
 ```cpp
   LOG_INFO << json_response.toStyledString();

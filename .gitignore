@@ -580,3 +580,6 @@ scrap/
 
 # Scripts
 scripts/setup_test_db.*
+
+# volumes
+.volumes/
