@@ -150,7 +150,7 @@ drogon::Task<bool> S3Service::ensure_bucket_exists(
 }
 
 drogon::Task<MediaInfo> S3Service::get_media_info(
-    const std::string &bucket_name, const std::string &object_key) {
+    std::string_view bucket_name, const std::string &object_key) {
   Aws::S3::Model::HeadObjectRequest head_request;
   head_request.SetBucket(bucket_name);
   head_request.SetKey(object_key);

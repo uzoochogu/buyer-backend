@@ -2,6 +2,8 @@
 
 #include <drogon/HttpController.h>
 
+#include <string>
+
 namespace api {
 
 namespace v1 {
@@ -38,32 +40,29 @@ class Chats : public drogon::HttpController<Chats> {
 
   static drogon::Task<> get_conversations(
       drogon::HttpRequestPtr req,
-      std::function<void(const drogon::HttpResponsePtr &)> callback);
+      std::function<void(const drogon::HttpResponsePtr&)> callback);
   static drogon::Task<> create_conversation(
       drogon::HttpRequestPtr req,
-      std::function<void(const drogon::HttpResponsePtr &)> callback);
+      std::function<void(const drogon::HttpResponsePtr&)> callback);
   static drogon::Task<> get_messages(
       drogon::HttpRequestPtr req,
-      std::function<void(const drogon::HttpResponsePtr &)> callback,
+      std::function<void(const drogon::HttpResponsePtr&)> callback,
       std::string conversation_id);
   static drogon::Task<> send_message(
       drogon::HttpRequestPtr req,
-      std::function<void(const drogon::HttpResponsePtr &)> callback,
+      std::function<void(const drogon::HttpResponsePtr&)> callback,
       std::string conversation_id);
-
   static drogon::Task<> get_conversation_by_offer(
       drogon::HttpRequestPtr req,
-      std::function<void(const drogon::HttpResponsePtr &)> callback,
+      std::function<void(const drogon::HttpResponsePtr&)> callback,
       std::string offer_id);
-
   static drogon::Task<> mark_messages_as_read(
       drogon::HttpRequestPtr req,
-      std::function<void(const drogon::HttpResponsePtr &)> callback,
+      std::function<void(const drogon::HttpResponsePtr&)> callback,
       std::string conversation_id);
   static drogon::Task<> get_unread_count(
       drogon::HttpRequestPtr req,
-      std::function<void(const drogon::HttpResponsePtr &)> callback);
+      std::function<void(const drogon::HttpResponsePtr&)> callback);
 };
-
 }  // namespace v1
 }  // namespace api

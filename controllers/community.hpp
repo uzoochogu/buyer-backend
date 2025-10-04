@@ -2,9 +2,11 @@
 
 #include <drogon/HttpController.h>
 
-namespace api {
-namespace v1 {
+#include <string>
 
+namespace api {
+
+namespace v1 {
 using drogon::Get;
 using drogon::Options;
 using drogon::Post;
@@ -13,7 +15,6 @@ using drogon::Put;
 class Community : public drogon::HttpController<Community> {
  public:
   METHOD_LIST_BEGIN
-  // Gets
   ADD_METHOD_TO(Community::get_posts, "/api/v1/posts", Get, Options,
                 "CorsMiddleware", "AuthMiddleware");
   ADD_METHOD_TO(Community::get_post_by_id, "/api/v1/posts/{id}", Get, Options,
@@ -25,7 +26,6 @@ class Community : public drogon::HttpController<Community> {
   ADD_METHOD_TO(Community::get_popular_tags, "/api/v1/posts/tags", Get, Options,
                 "CorsMiddleware", "AuthMiddleware");
 
-  // Posts
   ADD_METHOD_TO(Community::create_post, "/api/v1/posts", Post, Options,
                 "CorsMiddleware", "AuthMiddleware");
   ADD_METHOD_TO(Community::subscribe_to_post, "/api/v1/posts/{id}/subscribe",
@@ -41,7 +41,6 @@ class Community : public drogon::HttpController<Community> {
                 "/api/v1/entity/{name}/unsubscribe", Post, Options,
                 "CorsMiddleware", "AuthMiddleware");
 
-  // Puts
   ADD_METHOD_TO(Community::update_post, "/api/v1/posts/{id}", Put, Options,
                 "CorsMiddleware", "AuthMiddleware");
   METHOD_LIST_END

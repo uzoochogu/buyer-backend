@@ -1,9 +1,8 @@
 version: '3.8'
 
 services:
-  # Main PostgreSQL Database (Persistent)
   postgres-main:
-    image: postgis/postgis:17-3.4
+    image: postgis/postgis:18-3.6-alpine
     container_name: buyer-backend-postgres-main
     environment:
       POSTGRES_DB: agentbackend
@@ -23,38 +22,13 @@ services:
       timeout: 5s
       retries: 5
     restart: unless-stopped
-
-  # Test PostgreSQL Database (Non-persistent)
-  postgres-test:
-    image: postgis/postgis:17-3.4
-    container_name: buyer-backend-postgres-test
-    environment:
-      POSTGRES_DB: buyer_app_test
-      POSTGRES_USER: postgres
-      POSTGRES_PASSWORD: mypassword
-      POSTGRES_HOST_AUTH_METHOD: trust
-    ports:
-      - "5433:5432"
-    volumes:
-      - ./migrations/001_complete_schema.sql:/docker-entrypoint-initdb.d/001_complete_schema.sql:ro
-      - ./seeds/001_complete_seed_data.sql:/docker-entrypoint-initdb.d/001_complete_seed_data.sql:ro
-    networks:
-      - buyer-backend-network
-    healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U postgres -d buyer_app_test"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
-    restart: unless-stopped
-
-  # MinIO Object Storage
   minio:
     image: minio/minio:latest
     container_name: buyer-backend-minio
     command: server /data --console-address ":9001"
     environment:
       MINIO_ROOT_USER: minioadmin
-      MINIO_ROOT_PASSWORD: password
+      MINIO_ROOT_PASSWORD: mypassword
     ports:
       - "9000:9000"
       - "9001:9001"

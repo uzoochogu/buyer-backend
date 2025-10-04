@@ -1,10 +1,10 @@
-#pragma once
+#ifndef USERS_HPP
+#define USERS_HPP
 
 #include <drogon/HttpController.h>
 
 namespace api {
 namespace v1 {
-
 class Users : public drogon::HttpController<Users> {
  public:
   METHOD_LIST_BEGIN
@@ -19,3 +19,5 @@ class Users : public drogon::HttpController<Users> {
 
 }  // namespace v1
 }  // namespace api
+
+#endif  // USERS_HPPs

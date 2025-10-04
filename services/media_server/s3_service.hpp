@@ -34,7 +34,7 @@ class S3Service {
   // Ensures a bucket exists, creating it if necessary
   drogon::Task<bool> ensure_bucket_exists(const std::string& bucket_name);
 
-  drogon::Task<MediaInfo> get_media_info(const std::string& bucket_name,
+  drogon::Task<MediaInfo> get_media_info(std::string_view bucket_name,
                                          const std::string& object_key);
 
   Aws::S3::S3Client* get_client() { return s3_client_.get(); }

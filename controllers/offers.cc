@@ -17,10 +17,13 @@
 
 #include "../services/service_manager.hpp"
 #include "../utilities/conversion.hpp"
+#include "../utilities/json_manipulation.hpp"
+#include "common_req_n_resp.hpp"
 #include "scenario_specific_utils.hpp"
 
 using api::v1::Offers;
 using drogon::app;
+using drogon::CT_APPLICATION_JSON;
 using drogon::HttpResponse;
 using drogon::HttpResponsePtr;
 using drogon::k400BadRequest;
@@ -31,6 +34,112 @@ using drogon::Task;
 using drogon::orm::DrogonDbException;
 using drogon::orm::Result;
 using drogon::orm::Transaction;
+struct OfferInfo {
+  int id;
+  int post_id;
+  int user_id;
+  std::string username;
+  std::string title;
+  std::string description;
+  double price;
+  double original_price;
+  bool is_public;
+  std::string status;
+  std::string created_at;
+  std::string updated_at;
+  bool is_post_owner;
+  std::vector<MediaQuickInfo> media;
+};
+
+struct CreateOfferRequest {
+  std::string title;
+  std::string description;
+  double price;
+  std::optional<bool> is_public{true};
+  std::optional<std::vector<std::string>> media;  // Object keys
+};
+
+struct CreateOfferResponse {
+  std::string status;
+  int offer_id;
+};
+
+struct GetOfferResponse {
+  int id;
+  int post_id;
+  int user_id;
+  std::string username;
+  std::string title;
+  std::string description;
+  double price;
+  double original_price;
+  bool is_public;
+  std::string status;
+  std::string created_at;
+  std::string updated_at;
+  bool is_owner;
+  bool is_post_owner;
+  std::vector<MediaQuickInfo> media;
+};
+
+struct UpdateOfferRequest {
+  std::optional<std::string> title;
+  std::optional<std::string> description;
+  std::optional<double> price;
+  std::optional<bool> is_public;
+  std::optional<std::vector<std::string>> media;
+};
+
+struct UpdateOfferResponse {
+  std::string status;
+  std::string message;
+  std::string offer_id;
+  std::optional<std::vector<MediaQuickInfo>> media;
+};
+
+struct MyOfferInfo {
+  int id;
+  int post_id;
+  std::string post_content;
+  std::string post_owner_username;
+  std::string title;
+  std::string description;
+  double price;
+  double original_price;
+  bool is_public;
+  std::string status;
+  std::string created_at;
+  std::string updated_at;
+  std::vector<MediaQuickInfo> media;
+};
+
+struct ReceivedOfferInfo {
+  int id;
+  int post_id;
+  std::string post_content;
+  int user_id;
+  std::string offer_username;
+  std::string title;
+  std::string description;
+  double price;
+  double original_price;
+  bool is_public;
+  std::string status;
+  std::string created_at;
+  std::string updated_at;
+  std::vector<MediaQuickInfo> media;
+};
+
+struct NotificationInfo {
+  int id;
+  int offer_id;
+  bool is_read;
+  std::string created_at;
+  std::string offer_title;
+  std::string offer_status;
+  std::string offer_username;
+  std::string post_content;
+};
 
 // Get all offers for a post
 Task<> Offers::get_offers_for_post(
@@ -43,20 +152,22 @@ Task<> Offers::get_offers_for_post(
   try {
     // First check if the user is the owner of the post to determine if they
     // should see private offers
-    auto result = co_await db->execSqlCoro(
-        "SELECT user_id FROM posts WHERE id = $1", std::stoi(post_id));
+    auto result =
+        co_await db->execSqlCoro("SELECT user_id FROM posts WHERE id = $1",
+                                 convert::string_to_int(post_id).value());
 
     if (result.empty()) {
-      Json::Value error;
-      error["error"] = "Post not found";
-      auto resp = HttpResponse::newHttpJsonResponse(error);
-      resp->setStatusCode(k404NotFound);
+      SimpleError error{.error = "Post not found"};
+      auto resp =
+          HttpResponse::newHttpResponse(k404NotFound, CT_APPLICATION_JSON);
+      resp->setBody(glz::write_json(error).value_or(""));
       callback(resp);
       co_return;
     }
 
     int post_user_id = result[0]["user_id"].as<int>();
-    bool is_post_owner = (post_user_id == std::stoi(current_user_id));
+    bool is_post_owner =
+        (post_user_id == convert::string_to_int(current_user_id).value());
 
     // Query to get offers, including private ones if the user is the post owner
     std::string query;
@@ -70,7 +181,8 @@ Task<> Offers::get_offers_for_post(
           "ORDER BY o.created_at DESC";
 
       // Execute query with one parameter
-      offers_result = co_await db->execSqlCoro(query, std::stoi(post_id));
+      offers_result = co_await db->execSqlCoro(
+          query, convert::string_to_int(post_id).value());
     } else {
       query =
           "SELECT o.*, u.username FROM offers o "
@@ -78,40 +190,44 @@ Task<> Offers::get_offers_for_post(
           "WHERE o.post_id = $1 AND (o.is_public = TRUE OR o.user_id = $2) "
           "ORDER BY o.created_at DESC";
 
-      offers_result = co_await db->execSqlCoro(query, std::stoi(post_id),
-                                               std::stoi(current_user_id));
+      offers_result = co_await db->execSqlCoro(
+          query, convert::string_to_int(post_id).value(),
+          convert::string_to_int(current_user_id).value());
     }
 
-    Json::Value offers_array(Json::arrayValue);
+    std::vector<OfferInfo> offers_data;
+    offers_data.reserve(offers_result.size());
     for (const auto& row : offers_result) {
-      Json::Value offer;
       int offer_id = row["id"].as<int>();
-      offer["id"] = offer_id;
-      offer["post_id"] = row["post_id"].as<int>();
-      offer["user_id"] = row["user_id"].as<int>();
-      offer["username"] = row["username"].as<std::string>();
-      offer["title"] = row["title"].as<std::string>();
-      offer["description"] = row["description"].as<std::string>();
-      offer["price"] = row["price"].as<double>();
-      offer["original_price"] = row["original_price"].as<double>();
-      offer["is_public"] = row["is_public"].as<bool>();
-      offer["status"] = row["status"].as<std::string>();
-      offer["created_at"] = row["created_at"].as<std::string>();
-      offer["updated_at"] = row["updated_at"].as<std::string>();
-      offer["is_post_owner"] = is_post_owner;
-
-      offer["media"] = co_await get_media_attachments("offer", offer_id);
-      offers_array.append(offer);
+      auto media_attachments =
+          co_await get_media_attachments("offer", offer_id);
+      offers_data.push_back(
+          OfferInfo{.id = offer_id,
+                    .post_id = row["post_id"].as<int>(),
+                    .user_id = row["user_id"].as<int>(),
+                    .username = row["username"].as<std::string>(),
+                    .title = row["title"].as<std::string>(),
+                    .description = row["description"].as<std::string>(),
+                    .price = row["price"].as<double>(),
+                    .original_price = row["original_price"].as<double>(),
+                    .is_public = row["is_public"].as<bool>(),
+                    .status = row["status"].as<std::string>(),
+                    .created_at = row["created_at"].as<std::string>(),
+                    .updated_at = row["updated_at"].as<std::string>(),
+                    .is_post_owner = is_post_owner,
+                    .media = media_attachments.value_or({})});
     }
 
-    auto resp = HttpResponse::newHttpJsonResponse(offers_array);
+    auto resp =
+        HttpResponse::newHttpResponse(drogon::k200OK, CT_APPLICATION_JSON);
+    resp->setBody(glz::write_json(offers_data).value_or(""));
     callback(resp);
   } catch (const DrogonDbException& e) {
     LOG_ERROR << "Database error: " << e.base().what();
-    Json::Value error;
-    error["error"] = "Database error";
-    auto resp = HttpResponse::newHttpJsonResponse(error);
-    resp->setStatusCode(k500InternalServerError);
+    SimpleError error{.error = "Database error"};
+    auto resp = HttpResponse::newHttpResponse(k500InternalServerError,
+                                              CT_APPLICATION_JSON);
+    resp->setBody(glz::write_json(error).value_or(""));
     callback(resp);
   }
 
@@ -122,37 +238,38 @@ Task<> Offers::get_offers_for_post(
 Task<> Offers::create_offer(
     HttpRequestPtr req, std::function<void(const HttpResponsePtr&)> callback,
     std::string post_id) {
-  auto json = req->getJsonObject();
   std::string current_user_id =
       req->getAttributes()->get<std::string>("current_user_id");
 
-  // Validation: Malformed route
   if (!convert::string_to_int(post_id).has_value() ||
       convert::string_to_int(post_id).value() < 0) {
-    Json::Value error;
-    error["error"] = "Invalid post id";
-    auto resp = HttpResponse::newHttpJsonResponse(error);
-    resp->setStatusCode(k400BadRequest);
+    SimpleError error{.error = "Invalid post id"};
+    auto resp =
+        HttpResponse::newHttpResponse(k400BadRequest, CT_APPLICATION_JSON);
+    resp->setBody(glz::write_json(error).value_or(""));
     callback(resp);
     co_return;
   }
 
-  // Extract offer data
-  std::string title = (*json)["title"].asString();
-  std::string description = (*json)["description"].asString();
-  double price = (*json)["price"].asDouble();
-  bool is_public =
-      json->isMember("is_public") ? (*json)["is_public"].asBool() : true;
+  CreateOfferRequest create_req;
+  auto parse_error = utilities::strict_read_json(create_req, req->getBody());
 
-  Json::Value media_array = json->isMember("media")
-                                ? (*json)["media"]
-                                : Json::Value(Json::arrayValue);
+  if (parse_error || create_req.title.empty() ||
+      create_req.description.empty() || create_req.price <= 0.0) {
+    SimpleError error{.error = "Invalid JSON or missing fields"};
+    auto resp =
+        HttpResponse::newHttpResponse(k400BadRequest, CT_APPLICATION_JSON);
+    resp->setBody(glz::write_json(error).value_or(""));
+    callback(resp);
+    co_return;
+  }
 
-  if (media_array.size() > MAX_MEDIA_SIZE) {
-    Json::Value error;
-    error["error"] = "Maximum of 5 media items allowed per offer";
-    auto resp = HttpResponse::newHttpJsonResponse(error);
-    resp->setStatusCode(k400BadRequest);
+  if (create_req.media.has_value() &&
+      create_req.media->size() > service::MAX_MEDIA_SIZE) {
+    SimpleError error{.error = "Maximum of 5 media items allowed per offer"};
+    auto resp =
+        HttpResponse::newHttpResponse(k400BadRequest, CT_APPLICATION_JSON);
+    resp->setBody(glz::write_json(error).value_or(""));
     callback(resp);
     co_return;
   }
@@ -161,14 +278,15 @@ Task<> Offers::create_offer(
 
   try {
     // First check if the post exists and get the post owner
-    auto result = co_await db->execSqlCoro(
-        "SELECT user_id FROM posts WHERE id = $1", std::stoi(post_id));
+    auto result =
+        co_await db->execSqlCoro("SELECT user_id FROM posts WHERE id = $1",
+                                 convert::string_to_int(post_id).value());
 
     if (result.empty()) {
-      Json::Value error;
-      error["error"] = "Post not found";
-      auto resp = HttpResponse::newHttpJsonResponse(error);
-      resp->setStatusCode(k404NotFound);
+      SimpleError error{.error = "Post not found"};
+      auto resp =
+          HttpResponse::newHttpResponse(k404NotFound, CT_APPLICATION_JSON);
+      resp->setBody(glz::write_json(error).value_or(""));
       callback(resp);
       co_return;
     }
@@ -176,11 +294,11 @@ Task<> Offers::create_offer(
     int post_user_id = result[0]["user_id"].as<int>();
 
     // Don't allow users to make offers on their own posts
-    if (post_user_id == std::stoi(current_user_id)) {
-      Json::Value error;
-      error["error"] = "You cannot make offers on your own posts";
-      auto resp = HttpResponse::newHttpJsonResponse(error);
-      resp->setStatusCode(k400BadRequest);
+    if (post_user_id == convert::string_to_int(current_user_id).value()) {
+      SimpleError error{.error = "You cannot make offers on your own posts"};
+      auto resp =
+          HttpResponse::newHttpResponse(k400BadRequest, CT_APPLICATION_JSON);
+      resp->setBody(glz::write_json(error).value_or(""));
       callback(resp);
       co_return;
     }
@@ -190,10 +308,12 @@ Task<> Offers::create_offer(
       auto insert_result = co_await transaction->execSqlCoro(
           "INSERT INTO offers (post_id, user_id, title, description, price, "
           "original_price, is_public, status) "
-          "VALUES ($1, $2, $3, $4, $5, $6, $7, 'pending') "
+          "VALUES ($1, $2, $3, $4, $5, $5, $6, 'pending') "
           "RETURNING id, created_at",
-          std::stoi(post_id), std::stoi(current_user_id), title, description,
-          price, price, is_public);
+          convert::string_to_int(post_id).value(),
+          convert::string_to_int(current_user_id).value(), create_req.title,
+          create_req.description, create_req.price,
+          create_req.is_public.value_or(true));
 
       if (insert_result.empty()) {
         throw std::runtime_error("Initial insert failed");
@@ -201,27 +321,32 @@ Task<> Offers::create_offer(
 
       int offer_id = insert_result[0]["id"].as<int>();
       std::string created_at = insert_result[0]["created_at"].as<std::string>();
-      std::size_t media_array_size = media_array.size();
-      Json::Value processed_media = co_await process_media_attachments(
-          std::move(media_array), transaction, std::stoi(current_user_id),
-          "offer", offer_id);
-      if (processed_media == Json::nullValue ||
-          processed_media.size() < media_array_size) {
-        LOG_ERROR << " Some Media info was not found";
-        transaction->rollback();
-        std::string error_string;
-        for (const auto& media_item : processed_media) {
-          error_string += media_item["file_name"].asString() + ", ";
+      std::expected<std::vector<MediaQuickInfo>, std::string> processed_media;
+
+      if (create_req.media.has_value()) {
+        std::size_t media_array_size = create_req.media->size();
+        processed_media = (co_await process_media_attachments(
+            std::move(create_req.media.value()), transaction,
+            *convert::string_to_int(current_user_id), "offer", offer_id));
+        if (!processed_media.has_value() ||
+            (processed_media->size() < media_array_size)) {
+          LOG_ERROR << " Some Media info was not found";
+          transaction->rollback();
+          std::string error_string;
+          for (const auto& media_item : *processed_media) {
+            error_string += media_item.filename + ", ";
+          }
+          SimpleError error{
+              .error = std::format("Media info not found or processed, only "
+                                   "the following media items "
+                                   "were processed:\n{}",
+                                   error_string)};
+          auto resp = HttpResponse::newHttpResponse(k400BadRequest,
+                                                    CT_APPLICATION_JSON);
+          resp->setBody(glz::write_json(error).value_or(""));
+          callback(resp);
+          co_return;
         }
-        Json::Value error;
-        error["error"] = std::format(
-            "Media info not found or processed, only the following media items "
-            "were processed:\n{}",
-            error_string);
-        auto resp = HttpResponse::newHttpJsonResponse(error);
-        resp->setStatusCode(k400BadRequest);
-        callback(resp);
-        co_return;
       }
 
       // notification:
@@ -232,8 +357,7 @@ Task<> Offers::create_offer(
           offer_id, post_user_id);
 
       // Auto-subscribe offer owner to their offer
-      std::string offer_topic =
-          create_topic("offer", insert_result[0]["id"].as<std::string>());
+      std::string offer_topic = create_topic("offer", std::to_string(offer_id));
       ServiceManager::get_instance().get_subscriber().subscribe(offer_topic);
       ServiceManager::get_instance().get_connection_manager().subscribe(
           offer_topic, current_user_id);
@@ -241,41 +365,39 @@ Task<> Offers::create_offer(
       LOG_INFO << "User " << current_user_id
                << " subscribed to offer topic: " << offer_topic;
 
-      Json::Value offer_data_json;
-      offer_data_json["type"] = "offer_created";
-      offer_data_json["id"] = offer_id;
-      offer_data_json["message"] =
-          "New Offer: " + std::to_string(price) + ", " + title;
-      offer_data_json["modified_at"] = created_at;
-
-      Json::FastWriter writer;
-      std::string offer_data = writer.write(offer_data_json);
+      NotificationMessage msg{
+          .type = "offer_created",
+          .id = std::to_string(offer_id),
+          .message = "New Offer: " + std::to_string(create_req.price) + ", " +
+                     create_req.title,
+          .modified_at = created_at};
 
       std::string post_topic = create_topic("post", post_id);
-      ServiceManager::get_instance().get_publisher().publish(post_topic,
-                                                             offer_data);
+      ServiceManager::get_instance().get_publisher().publish(
+          post_topic, glz::write_json(msg).value_or(""));
       LOG_INFO << "Published new offer to post channel: " << post_topic;
 
-      Json::Value ret;
-      ret["status"] = "success";
-      ret["offer_id"] = offer_id;
-      auto resp = HttpResponse::newHttpJsonResponse(ret);
+      CreateOfferResponse response{.status = "success", .offer_id = offer_id};
+      auto resp =
+          HttpResponse::newHttpResponse(drogon::k200OK, CT_APPLICATION_JSON);
+      resp->setBody(glz::write_json(response).value_or(""));
       callback(resp);
     } catch (const std::exception& e) {
       transaction->rollback();
       LOG_ERROR << "Error creating offer: " << e.what();
-      Json::Value error;
-      error["error"] = std::format("Error creating offer: {}", e.what());
-      auto resp = HttpResponse::newHttpJsonResponse(error);
-      resp->setStatusCode(k500InternalServerError);
+      SimpleError error{.error =
+                            std::format("Error creating offer: {}", e.what())};
+      auto resp = HttpResponse::newHttpResponse(k500InternalServerError,
+                                                CT_APPLICATION_JSON);
+      resp->setBody(glz::write_json(error).value_or(""));
       callback(resp);
     }
   } catch (const DrogonDbException& e) {
     LOG_ERROR << "Database error: " << e.base().what();
-    Json::Value error;
-    error["error"] = "Database error";
-    auto resp = HttpResponse::newHttpJsonResponse(error);
-    resp->setStatusCode(k500InternalServerError);
+    SimpleError error{.error = "Database error"};
+    auto resp = HttpResponse::newHttpResponse(k500InternalServerError,
+                                              CT_APPLICATION_JSON);
+    resp->setBody(glz::write_json(error).value_or(""));
     callback(resp);
   }
 
@@ -290,32 +412,31 @@ Task<> Offers::get_offer(HttpRequestPtr req,
   std::string current_user_id =
       req->getAttributes()->get<std::string>("current_user_id");
 
-  // Validation: Malformed route
   if (!convert::string_to_int(id).has_value() ||
       convert::string_to_int(id).value() < 0) {
-    Json::Value error;
-    error["error"] = "Invalid offer id";
-    auto resp = HttpResponse::newHttpJsonResponse(error);
-    resp->setStatusCode(k400BadRequest);
+    SimpleError error{.error = "Invalid offer id"};
+    auto resp =
+        HttpResponse::newHttpResponse(k400BadRequest, CT_APPLICATION_JSON);
+    resp->setBody(glz::write_json(error).value_or(""));
     callback(resp);
     co_return;
   }
 
   try {
-    int current_user = std::stoi(current_user_id);
+    int current_user = convert::string_to_int(current_user_id).value();
     auto result = co_await db->execSqlCoro(
         "SELECT o.*, u.username, p.user_id as post_owner_id "
         "FROM offers o "
         "JOIN users u ON o.user_id = u.id "
         "JOIN posts p ON o.post_id = p.id "
         "WHERE o.id = $1",
-        std::stoi(id));
+        convert::string_to_int(id).value());
 
     if (result.empty()) {
-      Json::Value error;
-      error["error"] = "Offer not found";
-      auto resp = HttpResponse::newHttpJsonResponse(error);
-      resp->setStatusCode(k404NotFound);
+      SimpleError error{.error = "Offer not found"};
+      auto resp =
+          HttpResponse::newHttpResponse(k404NotFound, CT_APPLICATION_JSON);
+      resp->setBody(glz::write_json(error).value_or(""));
       callback(resp);
       co_return;
     }
@@ -330,40 +451,43 @@ Task<> Offers::get_offer(HttpRequestPtr req,
                            current_user == post_owner_id || is_public);
 
     if (!has_permission) {
-      Json::Value error;
-      error["error"] = "You don't have permission to view this offer";
-      auto resp = HttpResponse::newHttpJsonResponse(error);
-      resp->setStatusCode(k403Forbidden);
+      SimpleError error{.error =
+                            "You don't have permission to view this offer"};
+      auto resp =
+          HttpResponse::newHttpResponse(k403Forbidden, CT_APPLICATION_JSON);
+      resp->setBody(glz::write_json(error).value_or(""));
       callback(resp);
       co_return;
     }
+    auto media_attachments =
+        co_await get_media_attachments("offer", *convert::string_to_int(id));
+    GetOfferResponse response{
+        .id = row["id"].as<int>(),
+        .post_id = row["post_id"].as<int>(),
+        .user_id = offer_user_id,
+        .username = row["username"].as<std::string>(),
+        .title = row["title"].as<std::string>(),
+        .description = row["description"].as<std::string>(),
+        .price = row["price"].as<double>(),
+        .original_price = row["original_price"].as<double>(),
+        .is_public = is_public,
+        .status = row["status"].as<std::string>(),
+        .created_at = row["created_at"].as<std::string>(),
+        .updated_at = row["updated_at"].as<std::string>(),
+        .is_owner = (current_user == offer_user_id),
+        .is_post_owner = (current_user == post_owner_id),
+        .media = media_attachments.value_or({})};
 
-    Json::Value offer;
-    offer["id"] = row["id"].as<int>();
-    offer["post_id"] = row["post_id"].as<int>();
-    offer["user_id"] = offer_user_id;
-    offer["username"] = row["username"].as<std::string>();
-    offer["title"] = row["title"].as<std::string>();
-    offer["description"] = row["description"].as<std::string>();
-    offer["price"] = row["price"].as<double>();
-    offer["original_price"] = row["original_price"].as<double>();
-    offer["is_public"] = is_public;
-    offer["status"] = row["status"].as<std::string>();
-    offer["created_at"] = row["created_at"].as<std::string>();
-    offer["updated_at"] = row["updated_at"].as<std::string>();
-    offer["is_owner"] = (current_user == offer_user_id);
-    offer["is_post_owner"] = (current_user == post_owner_id);
-
-    offer["media"] = co_await get_media_attachments("offer", std::stoi(id));
-
-    auto resp = HttpResponse::newHttpJsonResponse(offer);
+    auto resp =
+        HttpResponse::newHttpResponse(drogon::k200OK, CT_APPLICATION_JSON);
+    resp->setBody(glz::write_json(response).value_or(""));
     callback(resp);
   } catch (const DrogonDbException& e) {
     LOG_ERROR << "Database error: " << e.base().what();
-    Json::Value error;
-    error["error"] = "Database error";
-    auto resp = HttpResponse::newHttpJsonResponse(error);
-    resp->setStatusCode(k500InternalServerError);
+    SimpleError error{.error = "Database error"};
+    auto resp = HttpResponse::newHttpResponse(k500InternalServerError,
+                                              CT_APPLICATION_JSON);
+    resp->setBody(glz::write_json(error).value_or(""));
     callback(resp);
   }
 
@@ -374,30 +498,37 @@ Task<> Offers::get_offer(HttpRequestPtr req,
 Task<> Offers::update_offer(
     HttpRequestPtr req, std::function<void(const HttpResponsePtr&)> callback,
     std::string id) {
-  auto json = req->getJsonObject();
   std::string current_user_id =
       req->getAttributes()->get<std::string>("current_user_id");
 
-  // Validation: Malformed route
   if (!convert::string_to_int(id).has_value() ||
       convert::string_to_int(id).value() < 0) {
-    Json::Value error;
-    error["error"] = "Invalid offer id";
-    auto resp = HttpResponse::newHttpJsonResponse(error);
-    resp->setStatusCode(k400BadRequest);
+    SimpleError error{.error = "Invalid offer id"};
+    auto resp =
+        HttpResponse::newHttpResponse(k400BadRequest, CT_APPLICATION_JSON);
+    resp->setBody(glz::write_json(error).value_or(""));
     callback(resp);
     co_return;
   }
 
-  Json::Value media_array = json->isMember("media")
-                                ? (*json)["media"]
-                                : Json::Value(Json::arrayValue);
+  UpdateOfferRequest update_req;
+  auto parse_error = utilities::strict_read_json(update_req, req->getBody());
 
-  if (media_array.size() > MAX_MEDIA_SIZE) {
-    Json::Value error;
-    error["error"] = "Maximum of 5 media items allowed per offer";
-    auto resp = HttpResponse::newHttpJsonResponse(error);
-    resp->setStatusCode(k400BadRequest);
+  if (parse_error) {
+    SimpleError error{.error = "Invalid JSON"};
+    auto resp =
+        HttpResponse::newHttpResponse(k400BadRequest, CT_APPLICATION_JSON);
+    resp->setBody(glz::write_json(error).value_or(""));
+    callback(resp);
+    co_return;
+  }
+
+  if (update_req.media.has_value() &&
+      update_req.media->size() > service::MAX_MEDIA_SIZE) {
+    SimpleError error{.error = "Maximum of 5 media items allowed per offer"};
+    auto resp =
+        HttpResponse::newHttpResponse(k400BadRequest, CT_APPLICATION_JSON);
+    resp->setBody(glz::write_json(error).value_or(""));
     callback(resp);
     co_return;
   }
@@ -407,13 +538,14 @@ Task<> Offers::update_offer(
   try {
     // First check if the user is the owner of the offer
     auto result = co_await db->execSqlCoro(
-        "SELECT user_id, status FROM offers WHERE id = $1", std::stoi(id));
+        "SELECT user_id, status FROM offers WHERE id = $1",
+        convert::string_to_int(id).value());
 
     if (result.empty()) {
-      Json::Value error;
-      error["error"] = "Offer not found";
-      auto resp = HttpResponse::newHttpJsonResponse(error);
-      resp->setStatusCode(k404NotFound);
+      SimpleError error{.error = "Offer not found"};
+      auto resp =
+          HttpResponse::newHttpResponse(k404NotFound, CT_APPLICATION_JSON);
+      resp->setBody(glz::write_json(error).value_or(""));
       callback(resp);
       co_return;
     }
@@ -421,38 +553,34 @@ Task<> Offers::update_offer(
     int offer_user_id = result[0]["user_id"].as<int>();
     std::string status = result[0]["status"].as<std::string>();
 
-    // Check if user has permission to update this offer
-    if (offer_user_id != std::stoi(current_user_id)) {
-      Json::Value error;
-      error["error"] = "You don't have permission to update this offer";
-      auto resp = HttpResponse::newHttpJsonResponse(error);
-      resp->setStatusCode(k403Forbidden);
+    if (offer_user_id != convert::string_to_int(current_user_id).value()) {
+      SimpleError error{.error =
+                            "You don't have permission to update this offer"};
+      auto resp =
+          HttpResponse::newHttpResponse(k403Forbidden, CT_APPLICATION_JSON);
+      resp->setBody(glz::write_json(error).value_or(""));
       callback(resp);
       co_return;
     }
 
-    // Check if offer can be updated (only pending offers can be updated)
     if (status != "pending") {
-      Json::Value error;
-      error["error"] = "Only pending offers can be updated";
-      auto resp = HttpResponse::newHttpJsonResponse(error);
-      resp->setStatusCode(k400BadRequest);
+      SimpleError error{.error = "Only pending offers can be updated"};
+      auto resp =
+          HttpResponse::newHttpResponse(k400BadRequest, CT_APPLICATION_JSON);
+      resp->setBody(glz::write_json(error).value_or(""));
       callback(resp);
       co_return;
     }
 
-    // Check which fields are provided for update
-    bool has_title = json->isMember("title");
-    bool has_description = json->isMember("description");
-    bool has_price = json->isMember("price");
-    bool has_is_public = json->isMember("is_public");
+    bool has_title = update_req.title.has_value();
+    bool has_description = update_req.description.has_value();
+    bool has_price = update_req.price.has_value();
+    bool has_is_public = update_req.is_public.has_value();
 
-    // Extract values (empty/default if not provided)
-    std::string title = has_title ? (*json)["title"].asString() : "";
-    std::string description =
-        has_description ? (*json)["description"].asString() : "";
-    double price = has_price ? (*json)["price"].asDouble() : 0.0;
-    bool is_public = has_is_public ? (*json)["is_public"].asBool() : true;
+    std::string title = update_req.title.value_or("");
+    std::string description = update_req.description.value_or("");
+    double price = update_req.price.value_or(0.0);
+    bool is_public = update_req.is_public.value_or(true);
 
     auto transaction = co_await db->newTransactionCoro();
 
@@ -467,8 +595,8 @@ Task<> Offers::update_offer(
           "updated_at = NOW() "
           "WHERE id = $1 "
           "RETURNING id, updated_at",
-          std::stoi(id), has_title, title, has_description, description,
-          has_price, price, has_is_public, is_public);
+          convert::string_to_int(id).value(), has_title, title, has_description,
+          description, has_price, price, has_is_public, is_public);
 
       if (update_result.empty()) {
         throw std::runtime_error("initial update failed");
@@ -477,67 +605,72 @@ Task<> Offers::update_offer(
       std::string updated_at = update_result[0]["updated_at"].as<std::string>();
 
       // Update media
-      std::size_t media_array_size = media_array.size();
-      Json::Value processed_media = co_await process_media_attachments(
-          std::move(media_array), transaction, stoi(current_user_id), "offer",
-          std::stoi(id));
-      if (processed_media == Json::nullValue ||
-          processed_media.size() < media_array_size) {
-        LOG_ERROR << " Some Media info was not found";
-        transaction->rollback();
-        std::string error_string;
-        for (const auto& media_item : processed_media) {
-          error_string += media_item["file_name"].asString() + ", ";
+      std::expected<std::vector<MediaQuickInfo>, std::string> processed_media;
+      if (update_req.media.has_value()) {
+        std::size_t media_array_size = update_req.media->size();
+        processed_media = co_await process_media_attachments(
+            std::move(update_req.media.value()), transaction,
+            convert::string_to_int(current_user_id).value(), "offer",
+            convert::string_to_int(id).value());
+        if (!processed_media.has_value() ||
+            (processed_media->size() < media_array_size)) {
+          LOG_ERROR << " Some Media info was not found";
+          transaction->rollback();
+          std::string error_string;
+          for (const auto& media_item : *processed_media) {
+            error_string += media_item.filename + ", ";
+          }
+          SimpleError error{
+              .error = std::format("Media info not found or processed, only "
+                                   "the following media items "
+                                   "were processed:\n{}",
+                                   error_string)};
+          auto resp = HttpResponse::newHttpResponse(k400BadRequest,
+                                                    CT_APPLICATION_JSON);
+          resp->setBody(glz::write_json(error).value_or(""));
+          callback(resp);
+          co_return;
         }
-        Json::Value error;
-        error["error"] = std::format(
-            "Media info not found or processed, only the following media items "
-            "were processed:\n{}",
-            error_string);
-        auto resp = HttpResponse::newHttpJsonResponse(error);
-        resp->setStatusCode(k400BadRequest);
-        callback(resp);
-        co_return;
       }
 
       // notification
       std::string offer_topic = create_topic("offer", id);
-      Json::Value offer_data_json;
-      offer_data_json["type"] = "offer_updated";
-      offer_data_json["id"] = id;
-      offer_data_json["message"] = "Offer updated";
-      offer_data_json["modified_at"] = updated_at;
 
-      Json::FastWriter writer;
-      std::string offer_data = writer.write(offer_data_json);
+      NotificationMessage msg{.type = "offer_updated",
+                              .id = id,
+                              .message = "Offer updated",
+                              .modified_at = updated_at};
 
-      ServiceManager::get_instance().get_publisher().publish(offer_topic,
-                                                             offer_data);
-      Json::Value ret;
-      ret["status"] = "success";
-      ret["message"] = "Offer updated successfully";
-      ret["offer_id"] = id;
-      if (!processed_media.empty()) {
-        ret["media"] = processed_media;
-      }
-      auto resp = HttpResponse::newHttpJsonResponse(ret);
+      ServiceManager::get_instance().get_publisher().publish(
+          offer_topic, glz::write_json(msg).value_or(""));
+      UpdateOfferResponse response{
+          .status = "success",
+          .message = "Offer updated successfully",
+          .offer_id = id,
+          .media = processed_media->empty()
+                       ? std::nullopt
+                       : std::make_optional(*processed_media)};
+      auto resp =
+          HttpResponse::newHttpResponse(drogon::k200OK, CT_APPLICATION_JSON);
+      resp->setBody(glz::write_json(response).value_or(""));
       callback(resp);
 
     } catch (const std::exception& e) {
       transaction->rollback();
       LOG_ERROR << "Error updating offer: " << e.what();
-      Json::Value error;
-      error["error"] = std::format("Error updating offer: {}", e.what());
-      auto resp = HttpResponse::newHttpJsonResponse(error);
-      resp->setStatusCode(k500InternalServerError);
+      SimpleError error{.error =
+                            std::format("Error updating offer: {}", e.what())};
+      auto resp = HttpResponse::newHttpResponse(k500InternalServerError,
+                                                CT_APPLICATION_JSON);
+      resp->setBody(glz::write_json(error).value_or(""));
       callback(resp);
     }
   } catch (const DrogonDbException& e) {
     LOG_ERROR << "Database error: " << e.base().what();
-    Json::Value error;
-    error["error"] = "Database error";
-    auto resp = HttpResponse::newHttpJsonResponse(error);
-    resp->setStatusCode(k500InternalServerError);
+    SimpleError error{.error = "Database error"};
+    auto resp = HttpResponse::newHttpResponse(k500InternalServerError,
+                                              CT_APPLICATION_JSON);
+    resp->setBody(glz::write_json(error).value_or(""));
     callback(resp);
   }
 
@@ -569,7 +702,7 @@ void update_message_metadata(std::shared_ptr<Transaction> transaction,
                        "metadata for ID "
                     << id << ": " << e.base().what();
         },
-        id);
+        convert::string_to_int(id).value());
   } else {
     LOG_INFO << "Updating message metadata for offer: " << id
              << " to status: " << new_status;
@@ -602,19 +735,18 @@ Task<> Offers::accept_offer(
   auto db = app().getDbClient();
 
   try {
-    // First check if the user is the owner of the post
     auto result = co_await db->execSqlCoro(
         "SELECT o.post_id, p.user_id as post_owner_id, o.status "
         "FROM offers o "
         "JOIN posts p ON o.post_id = p.id "
         "WHERE o.id = $1",
-        std::stoi(id));
+        convert::string_to_int(id).value());
 
     if (result.empty()) {
-      Json::Value error;
-      error["error"] = "Offer not found";
-      auto resp = HttpResponse::newHttpJsonResponse(error);
-      resp->setStatusCode(k404NotFound);
+      SimpleError error{.error = "Offer not found"};
+      auto resp =
+          HttpResponse::newHttpResponse(k404NotFound, CT_APPLICATION_JSON);
+      resp->setBody(glz::write_json(error).value_or(""));
       callback(resp);
       co_return;
     }
@@ -623,49 +755,44 @@ Task<> Offers::accept_offer(
     int post_id = result[0]["post_id"].as<int>();
     std::string status = result[0]["status"].as<std::string>();
 
-    // Check if user has permission to accept this offer
-    if (post_owner_id != std::stoi(current_user_id)) {
-      Json::Value error;
-      error["error"] = "Only the post owner can accept offers";
-      auto resp = HttpResponse::newHttpJsonResponse(error);
-      resp->setStatusCode(k403Forbidden);
+    if (post_owner_id != convert::string_to_int(current_user_id).value()) {
+      SimpleError error{.error = "Only the post owner can accept offers"};
+      auto resp =
+          HttpResponse::newHttpResponse(k403Forbidden, CT_APPLICATION_JSON);
+      resp->setBody(glz::write_json(error).value_or(""));
       callback(resp);
       co_return;
     }
 
-    // Check if offer can be accepted (only pending offers can be accepted)
     if (status != "pending") {
-      Json::Value error;
-      error["error"] = "Only pending offers can be accepted";
-      auto resp = HttpResponse::newHttpJsonResponse(error);
-      resp->setStatusCode(k400BadRequest);
+      SimpleError error{.error = "Only pending offers can be accepted"};
+      auto resp =
+          HttpResponse::newHttpResponse(k400BadRequest, CT_APPLICATION_JSON);
+      resp->setBody(glz::write_json(error).value_or(""));
       callback(resp);
       co_return;
     }
 
-    // Create a transaction to handle all the updates atomically
     auto trans = co_await db->newTransactionCoro();
 
     try {
-      // Update the accepted offer
       auto update_result = co_await trans->execSqlCoro(
           "UPDATE offers SET status = 'accepted', negotiation_status = "
           "'completed', updated_at = NOW() WHERE id = $1 "
           "RETURNING updated_at",
-          std::stoi(id));
+          convert::string_to_int(id).value());
 
       // Get the latest price negotiation for this offer (if any) and accept it
       auto negotiation_result = co_await trans->execSqlCoro(
           "SELECT id FROM price_negotiations "
           "WHERE offer_id = $1 AND status = 'pending' "
           "ORDER BY created_at DESC LIMIT 1",
-          std::stoi(id));
+          convert::string_to_int(id).value());
 
       drogon::orm::Result
           rejected_offers_result;  // nullptr, always inited in both branches
 
-      // If there are pending negotiations, accept the latest one and reject
-      // others
+      // For pending negotiations, accept the latest one and reject others
       if (!negotiation_result.empty()) {
         int latest_negotiation_id = negotiation_result[0]["id"].as<int>();
         std::string negotiation_id_str = std::to_string(latest_negotiation_id);
@@ -686,7 +813,7 @@ Task<> Offers::accept_offer(
             "SET status = 'rejected', updated_at = NOW() "
             "WHERE offer_id = $1 AND id != $2 AND status = 'pending' "
             "RETURNING id",
-            std::stoi(id), latest_negotiation_id);
+            convert::string_to_int(id).value(), latest_negotiation_id);
 
         LOG_INFO << "other_negotiations_result: "
                  << other_negotiations_result.size() << "\n";
@@ -703,7 +830,7 @@ Task<> Offers::accept_offer(
             "UPDATE offers SET status = 'rejected', negotiation_status = "
             "'completed', updated_at = NOW() WHERE post_id = $1 AND id != $2 "
             "AND status = 'pending' RETURNING id, updated_at",
-            post_id, std::stoi(id));
+            post_id, convert::string_to_int(id).value());
 
         // Update message metadata for all rejected offers
         for (const auto& row : rejected_offers_result) {
@@ -719,7 +846,7 @@ Task<> Offers::accept_offer(
             "WHERE pn.offer_id = o.id AND o.post_id = $1 AND "
             "o.id != $2 AND pn.status = 'pending' "
             "RETURNING pn.id",
-            post_id, std::stoi(id));
+            post_id, convert::string_to_int(id).value());
 
         // Update message metadata for rejected negotiations from other offers
         for (const auto& row : rejected_negotiations_result) {
@@ -738,7 +865,7 @@ Task<> Offers::accept_offer(
             "UPDATE offers SET status = 'rejected', updated_at = NOW() "
             "WHERE post_id = $1 AND id != $2 AND status = 'pending' "
             "RETURNING id, updated_at",
-            post_id, std::stoi(id));
+            post_id, convert::string_to_int(id).value());
 
         // Update message metadata for all rejected offers
         for (const auto& row : rejected_offers_result) {
@@ -754,7 +881,7 @@ Task<> Offers::accept_offer(
             "WHERE pn.offer_id = o.id AND o.post_id = $1 AND "
             "o.id != $2 AND pn.status = 'pending' "
             "RETURNING pn.id",
-            post_id, std::stoi(id));
+            post_id, convert::string_to_int(id).value());
 
         // Update message metadata for rejected negotiations
         for (const auto& row : rejected_negotiations_result) {
@@ -770,23 +897,16 @@ Task<> Offers::accept_offer(
             post_id);
       }
 
-      // notify only after a successful commit
       // notify the accepted offer
       std::string offer_topic = create_topic("offer", id);
-      // create offer data
-      Json::Value offer_data_json;
-      offer_data_json["type"] = "offer_accepted";
-      offer_data_json["id"] = id;
-      offer_data_json["message"] = "Offer was accepted";
-      offer_data_json["modified_at"] =
-          update_result[0]["updated_at"].as<std::string>();
+      NotificationMessage msg{
+          .type = "offer_accepted",
+          .id = id,
+          .message = "Offer was accepted",
+          .modified_at = update_result[0]["updated_at"].as<std::string>()};
 
-      Json::FastWriter writer;
-      std::string offer_data = writer.write(offer_data_json);
-
-      // Publish to offer subscribers
-      ServiceManager::get_instance().get_publisher().publish(offer_topic,
-                                                             offer_data);
+      ServiceManager::get_instance().get_publisher().publish(
+          offer_topic, glz::write_json(msg).value_or(""));
 
       // notify rejected offers
       for (const auto& row : rejected_offers_result) {
@@ -794,48 +914,46 @@ Task<> Offers::accept_offer(
 
         offer_topic = create_topic("offer", rejected_offer_id);
 
-        // create offer data
-        offer_data_json["type"] = "offer_rejected";
-        offer_data_json["id"] = rejected_offer_id;
-        offer_data_json["message"] = "Offer was rejected";
-        offer_data_json["modified_at"] =
-            rejected_offers_result[0]["updated_at"].as<std::string>();
-
-        offer_data = writer.write(offer_data_json);
-
-        ServiceManager::get_instance().get_publisher().publish(offer_topic,
-                                                               offer_data);
+        msg = NotificationMessage{
+            .type = "offer_rejected",
+            .id = rejected_offer_id,
+            .message = "Offer was rejected",
+            .modified_at =
+                rejected_offers_result[0]["updated_at"].as<std::string>()};
+        ServiceManager::get_instance().get_publisher().publish(
+            offer_topic, glz::write_json(msg).value_or(""));
       }
 
       // Delete all offer and subscriptions for that post?
 
-      Json::Value ret;
-      ret["status"] = "success";
-      ret["message"] = "Offer accepted successfully";
-      auto resp = HttpResponse::newHttpJsonResponse(ret);
+      StatusResponse response{.status = "success",
+                              .message = "Offer accepted successfully"};
+      auto resp =
+          HttpResponse::newHttpResponse(drogon::k200OK, CT_APPLICATION_JSON);
+      resp->setBody(glz::write_json(response).value_or(""));
       callback(resp);
     } catch (const DrogonDbException& e) {
       LOG_ERROR << "Database error: " << e.base().what();
       trans->rollback();
-      Json::Value error;
-      error["error"] = "Database error";
-      auto resp = HttpResponse::newHttpJsonResponse(error);
-      resp->setStatusCode(k500InternalServerError);
+      SimpleError error{.error = "Database error"};
+      auto resp = HttpResponse::newHttpResponse(k500InternalServerError,
+                                                CT_APPLICATION_JSON);
+      resp->setBody(glz::write_json(error).value_or(""));
       callback(resp);
     }
   } catch (const DrogonDbException& e) {
     LOG_ERROR << "Database error: " << e.base().what();
-    Json::Value error;
-    error["error"] = "Database error";
-    auto resp = HttpResponse::newHttpJsonResponse(error);
-    resp->setStatusCode(k500InternalServerError);
+    SimpleError error{.error = "Database error"};
+    auto resp = HttpResponse::newHttpResponse(k500InternalServerError,
+                                              CT_APPLICATION_JSON);
+    resp->setBody(glz::write_json(error).value_or(""));
     callback(resp);
   } catch (const std::exception& e) {
     LOG_ERROR << "Error: " << e.what();
-    Json::Value error;
-    error["error"] = "Internal server error";
-    auto resp = HttpResponse::newHttpJsonResponse(error);
-    resp->setStatusCode(k500InternalServerError);
+    SimpleError error{.error = "Internal server error"};
+    auto resp = HttpResponse::newHttpResponse(k500InternalServerError,
+                                              CT_APPLICATION_JSON);
+    resp->setBody(glz::write_json(error).value_or(""));
     callback(resp);
   }
 
@@ -852,19 +970,18 @@ Task<> Offers::accept_counter_offer(
   auto db = app().getDbClient();
 
   try {
-    // First check if the user is the creator of the offer
     auto result = co_await db->execSqlCoro(
         "SELECT o.user_id, o.post_id, p.user_id as post_owner_id, o.status "
         "FROM offers o "
         "JOIN posts p ON o.post_id = p.id "
         "WHERE o.id = $1",
-        std::stoi(id));
+        convert::string_to_int(id).value());
 
     if (result.empty()) {
-      Json::Value error;
-      error["error"] = "Offer not found";
-      auto resp = HttpResponse::newHttpJsonResponse(error);
-      resp->setStatusCode(k404NotFound);
+      SimpleError error{.error = "Offer not found"};
+      auto resp =
+          HttpResponse::newHttpResponse(k404NotFound, CT_APPLICATION_JSON);
+      resp->setBody(glz::write_json(error).value_or(""));
       callback(resp);
       co_return;
     }
@@ -873,27 +990,25 @@ Task<> Offers::accept_counter_offer(
     int post_id = result[0]["post_id"].as<int>();
     std::string status = result[0]["status"].as<std::string>();
 
-    // Check if user has permission to accept this counter-offer
-    if (offer_user_id != std::stoi(current_user_id)) {
-      Json::Value error;
-      error["error"] = "Only the offer creator can accept counter-offers";
-      auto resp = HttpResponse::newHttpJsonResponse(error);
-      resp->setStatusCode(k403Forbidden);
+    if (offer_user_id != convert::string_to_int(current_user_id).value()) {
+      SimpleError error{.error =
+                            "Only the offer creator can accept counter-offers"};
+      auto resp =
+          HttpResponse::newHttpResponse(k403Forbidden, CT_APPLICATION_JSON);
+      resp->setBody(glz::write_json(error).value_or(""));
       callback(resp);
       co_return;
     }
 
-    // Check if offer can be accepted (only pending offers can be accepted)
     if (status != "pending") {
-      Json::Value error;
-      error["error"] = "Only pending offers can be accepted";
-      auto resp = HttpResponse::newHttpJsonResponse(error);
-      resp->setStatusCode(k400BadRequest);
+      SimpleError error{.error = "Only pending offers can be accepted"};
+      auto resp =
+          HttpResponse::newHttpResponse(k400BadRequest, CT_APPLICATION_JSON);
+      resp->setBody(glz::write_json(error).value_or(""));
       callback(resp);
       co_return;
     }
 
-    // Create a transaction to handle all the updates atomically
     auto trans = co_await db->newTransactionCoro();
 
     try {
@@ -902,13 +1017,13 @@ Task<> Offers::accept_counter_offer(
           "SELECT id, proposed_price FROM price_negotiations "
           "WHERE offer_id = $1 AND status = 'pending' "
           "ORDER BY created_at DESC LIMIT 1",
-          std::stoi(id));
+          convert::string_to_int(id).value());
 
       if (price_result.empty()) {
-        Json::Value error;
-        error["error"] = "No pending negotiations found";
-        auto resp = HttpResponse::newHttpJsonResponse(error);
-        resp->setStatusCode(k400BadRequest);
+        SimpleError error{.error = "No pending negotiations found"};
+        auto resp =
+            HttpResponse::newHttpResponse(k400BadRequest, CT_APPLICATION_JSON);
+        resp->setBody(glz::write_json(error).value_or(""));
         callback(resp);
         co_return;
       }
@@ -922,7 +1037,7 @@ Task<> Offers::accept_counter_offer(
           "UPDATE offers SET status = 'accepted', price = $2, "
           "negotiation_status = 'completed', updated_at = NOW() WHERE id = $1 "
           "RETURNING updated_at",
-          std::stoi(id), latest_price);
+          convert::string_to_int(id).value(), latest_price);
 
       // Update message metadata for the accepted offer
       update_message_metadata(trans, id, "accepted");
@@ -943,7 +1058,7 @@ Task<> Offers::accept_counter_offer(
           "SET status = 'rejected', updated_at = NOW() "
           "WHERE offer_id = $1 AND id != $2 AND status = 'pending' "
           "RETURNING id",
-          std::stoi(id), latest_negotiation_id);
+          convert::string_to_int(id).value(), latest_negotiation_id);
 
       // Update message metadata for rejected negotiations
       for (const auto& row : rejected_negotiations_result) {
@@ -958,7 +1073,7 @@ Task<> Offers::accept_counter_offer(
           "'completed', updated_at = NOW()"
           "WHERE post_id = $1 AND id != $2 AND status = 'pending' RETURNING "
           "id, updated_at",
-          post_id, std::stoi(id));
+          post_id, convert::string_to_int(id).value());
 
       // Update message metadata for rejected offers
       for (const auto& row : rejected_offers_result) {
@@ -971,10 +1086,10 @@ Task<> Offers::accept_counter_offer(
           "UPDATE price_negotiations pn "
           "SET status = 'rejected', updated_at = NOW() "
           "FROM offers o "
-          "WHERE pn.offer_id = o.id AND o.post_id = $1 AND o.id != $2 AND "
-          "pn.status = 'pending' "
+          "WHERE pn.offer_id = o.id AND o.post_id = $1 AND "
+          "o.id != $2 AND pn.status = 'pending' "
           "RETURNING pn.id",
-          post_id, std::stoi(id));
+          post_id, convert::string_to_int(id).value());
 
       // Update message metadata for rejected negotiations from other offers
       for (const auto& row : other_negotiations_result) {
@@ -990,19 +1105,14 @@ Task<> Offers::accept_counter_offer(
 
       // notify accepted offer only after a successful commit
       std::string offer_topic = create_topic("offer", id);
-      Json::Value offer_data_json;
-      offer_data_json["type"] = "offer_accepted";
-      offer_data_json["id"] = id;
-      offer_data_json["message"] = "Offer was accepted";
-      offer_data_json["modified_at"] =
-          update_result[0]["updated_at"].as<std::string>();
+      NotificationMessage msg{
+          .type = "offer_accepted",
+          .id = id,
+          .message = "Offer was accepted",
+          .modified_at = update_result[0]["updated_at"].as<std::string>()};
 
-      Json::FastWriter writer;
-      std::string offer_data = writer.write(offer_data_json);
-
-      // Publish to offer subscribers
-      ServiceManager::get_instance().get_publisher().publish(offer_topic,
-                                                             offer_data);
+      ServiceManager::get_instance().get_publisher().publish(
+          offer_topic, glz::write_json(msg).value_or(""));
 
       // notify other rejected offers
       for (const auto& row : rejected_offers_result) {
@@ -1010,45 +1120,42 @@ Task<> Offers::accept_counter_offer(
 
         offer_topic = create_topic("offer", rejected_offer_id);
 
-        // create offer data
-        offer_data_json["type"] = "offer_rejected";
-        offer_data_json["id"] = rejected_offer_id;
-        offer_data_json["message"] = "Offer was rejected";
-        offer_data_json["modified_at"] =
-            rejected_offers_result[0]["updated_at"].as<std::string>();
-
-        offer_data = writer.write(offer_data_json);
-
-        ServiceManager::get_instance().get_publisher().publish(offer_topic,
-                                                               offer_data);
+        msg = NotificationMessage{
+            .type = "offer_rejected",
+            .id = rejected_offer_id,
+            .message = "Offer was rejected",
+            .modified_at =
+                rejected_offers_result[0]["updated_at"].as<std::string>()};
+        ServiceManager::get_instance().get_publisher().publish(
+            offer_topic, glz::write_json(msg).value_or(""));
       }
 
       // delete all offers subscriptions for this post?
       // co_await trans->execSqlCoro(
       //     "DELETE FROM user_subscriptions WHERE subscription = $1",
       //     post_topic);
-      //
 
-      Json::Value ret;
-      ret["status"] = "success";
-      ret["message"] = "Counter-offer accepted successfully";
-      auto resp = HttpResponse::newHttpJsonResponse(ret);
+      StatusResponse response{.status = "success",
+                              .message = "Counter-offer accepted successfully"};
+      auto resp =
+          HttpResponse::newHttpResponse(drogon::k200OK, CT_APPLICATION_JSON);
+      resp->setBody(glz::write_json(response).value_or(""));
       callback(resp);
     } catch (const DrogonDbException& e) {
       LOG_ERROR << "Database error: " << e.base().what();
       trans->rollback();
-      Json::Value error;
-      error["error"] = "Database error";
-      auto resp = HttpResponse::newHttpJsonResponse(error);
-      resp->setStatusCode(k500InternalServerError);
+      SimpleError error{.error = "Database error"};
+      auto resp = HttpResponse::newHttpResponse(k500InternalServerError,
+                                                CT_APPLICATION_JSON);
+      resp->setBody(glz::write_json(error).value_or(""));
       callback(resp);
     }
   } catch (const DrogonDbException& e) {
     LOG_ERROR << "Database error: " << e.base().what();
-    Json::Value error;
-    error["error"] = "Database error";
-    auto resp = HttpResponse::newHttpJsonResponse(error);
-    resp->setStatusCode(k500InternalServerError);
+    SimpleError error{.error = "Database error"};
+    auto resp = HttpResponse::newHttpResponse(k500InternalServerError,
+                                              CT_APPLICATION_JSON);
+    resp->setBody(glz::write_json(error).value_or(""));
     callback(resp);
   }
 
@@ -1065,19 +1172,18 @@ Task<> Offers::reject_offer(
   auto db = app().getDbClient();
 
   try {
-    // First check if the user is the owner of the post
     auto result = co_await db->execSqlCoro(
         "SELECT o.post_id, p.user_id as post_owner_id, o.status "
         "FROM offers o "
         "JOIN posts p ON o.post_id = p.id "
         "WHERE o.id = $1",
-        std::stoi(id));
+        convert::string_to_int(id).value());
 
     if (result.empty()) {
-      Json::Value error;
-      error["error"] = "Offer not found";
-      auto resp = HttpResponse::newHttpJsonResponse(error);
-      resp->setStatusCode(k404NotFound);
+      SimpleError error{.error = "Offer not found"};
+      auto resp =
+          HttpResponse::newHttpResponse(k404NotFound, CT_APPLICATION_JSON);
+      resp->setBody(glz::write_json(error).value_or(""));
       callback(resp);
       co_return;
     }
@@ -1085,62 +1191,55 @@ Task<> Offers::reject_offer(
     int post_owner_id = result[0]["post_owner_id"].as<int>();
     std::string status = result[0]["status"].as<std::string>();
 
-    // Check if user has permission to reject this offer
-    if (post_owner_id != std::stoi(current_user_id)) {
-      Json::Value error;
-      error["error"] = "Only the post owner can reject offers";
-      auto resp = HttpResponse::newHttpJsonResponse(error);
-      resp->setStatusCode(k403Forbidden);
+    if (post_owner_id != convert::string_to_int(current_user_id).value()) {
+      SimpleError error{.error = "Only the post owner can reject offers"};
+      auto resp =
+          HttpResponse::newHttpResponse(k403Forbidden, CT_APPLICATION_JSON);
+      resp->setBody(glz::write_json(error).value_or(""));
       callback(resp);
       co_return;
     }
 
-    // Check if offer can be rejected (only pending offers can be rejected)
     if (status != "pending") {
-      Json::Value error;
-      error["error"] = "Only pending offers can be rejected";
-      auto resp = HttpResponse::newHttpJsonResponse(error);
-      resp->setStatusCode(k400BadRequest);
+      SimpleError error{.error = "Only pending offers can be rejected"};
+      auto resp =
+          HttpResponse::newHttpResponse(k400BadRequest, CT_APPLICATION_JSON);
+      resp->setBody(glz::write_json(error).value_or(""));
       callback(resp);
       co_return;
     }
 
-    // Update the offer status
     auto update_result = co_await db->execSqlCoro(
         "UPDATE offers SET status = 'rejected', negotiation_status = "
         "'completed', updated_at = NOW() WHERE id = $1 "
         "RETURNING updated_at",
-        std::stoi(id));
+        convert::string_to_int(id).value());
 
     // notify the rejected offer
     std::string offer_topic = create_topic("offer", id);
+    NotificationMessage msg{
+        .type = "offer_rejected",
+        .id = id,
+        .message = "Offer was rejected",
+        .modified_at = update_result[0]["updated_at"].as<std::string>()};
 
-    Json::Value offer_data_json;
-    offer_data_json["type"] = "offer_rejected";
-    offer_data_json["id"] = id;
-    offer_data_json["message"] = "Offer was rejected";
-    offer_data_json["modified_at"] =
-        update_result[0]["updated_at"].as<std::string>();
+    ServiceManager::get_instance().get_publisher().publish(
+        offer_topic, glz::write_json(msg).value_or(""));
 
-    Json::FastWriter writer;
-    std::string offer_data = writer.write(offer_data_json);
-
-    // Publish to offer subscribers
-    ServiceManager::get_instance().get_publisher().publish(offer_topic,
-                                                           offer_data);
     LOG_INFO << "Rejected offer: " << offer_topic;
 
-    Json::Value ret;
-    ret["status"] = "success";
-    ret["message"] = "Offer rejected successfully";
-    auto resp = HttpResponse::newHttpJsonResponse(ret);
+    StatusResponse response{.status = "success",
+                            .message = "Offer rejected successfully"};
+    auto resp =
+        HttpResponse::newHttpResponse(drogon::k200OK, CT_APPLICATION_JSON);
+    resp->setBody(glz::write_json(response).value_or(""));
     callback(resp);
   } catch (const DrogonDbException& e) {
     LOG_ERROR << "Database error: " << e.base().what();
-    Json::Value error;
-    error["error"] = "Database error";
-    auto resp = HttpResponse::newHttpJsonResponse(error);
-    resp->setStatusCode(k500InternalServerError);
+    SimpleError error{.error = "Database error"};
+    auto resp = HttpResponse::newHttpResponse(k500InternalServerError,
+                                              CT_APPLICATION_JSON);
+    resp->setBody(glz::write_json(error).value_or(""));
     callback(resp);
   }
 
@@ -1164,38 +1263,40 @@ Task<> Offers::get_my_offers(
         "JOIN users u ON p.user_id = u.id "
         "WHERE o.user_id = $1 "
         "ORDER BY o.updated_at DESC",
-        std::stoi(current_user_id));
+        convert::string_to_int(current_user_id).value());
 
-    Json::Value offers_array(Json::arrayValue);
+    std::vector<MyOfferInfo> my_offers_data;
+    my_offers_data.reserve(result.size());
     for (const auto& row : result) {
-      Json::Value offer;
       int offer_id = row["id"].as<int>();
-      offer["id"] = offer_id;
-      offer["post_id"] = row["post_id"].as<int>();
-      offer["post_content"] = row["post_content"].as<std::string>();
-      offer["post_owner_username"] =
-          row["post_owner_username"].as<std::string>();
-      offer["title"] = row["title"].as<std::string>();
-      offer["description"] = row["description"].as<std::string>();
-      offer["price"] = row["price"].as<double>();
-      offer["original_price"] = row["original_price"].as<double>();
-      offer["is_public"] = row["is_public"].as<bool>();
-      offer["status"] = row["status"].as<std::string>();
-      offer["created_at"] = row["created_at"].as<std::string>();
-      offer["updated_at"] = row["updated_at"].as<std::string>();
-
-      offer["media"] = co_await get_media_attachments("offer", offer_id);
-      offers_array.append(offer);
+      auto media_attachments =
+          co_await get_media_attachments("offer", offer_id);
+      my_offers_data.emplace_back(MyOfferInfo{
+          .id = offer_id,
+          .post_id = row["post_id"].as<int>(),
+          .post_content = row["post_content"].as<std::string>(),
+          .post_owner_username = row["post_owner_username"].as<std::string>(),
+          .title = row["title"].as<std::string>(),
+          .description = row["description"].as<std::string>(),
+          .price = row["price"].as<double>(),
+          .original_price = row["original_price"].as<double>(),
+          .is_public = row["is_public"].as<bool>(),
+          .status = row["status"].as<std::string>(),
+          .created_at = row["created_at"].as<std::string>(),
+          .updated_at = row["updated_at"].as<std::string>(),
+          .media = media_attachments.value_or({})});
     }
 
-    auto resp = HttpResponse::newHttpJsonResponse(offers_array);
+    auto resp =
+        HttpResponse::newHttpResponse(drogon::k200OK, CT_APPLICATION_JSON);
+    resp->setBody(glz::write_json(my_offers_data).value_or(""));
     callback(resp);
   } catch (const DrogonDbException& e) {
     LOG_ERROR << "Database error: " << e.base().what();
-    Json::Value error;
-    error["error"] = "Database error";
-    auto resp = HttpResponse::newHttpJsonResponse(error);
-    resp->setStatusCode(k500InternalServerError);
+    SimpleError error{.error = "Database error"};
+    auto resp = HttpResponse::newHttpResponse(k500InternalServerError,
+                                              CT_APPLICATION_JSON);
+    resp->setBody(glz::write_json(error).value_or(""));
     callback(resp);
   }
 
@@ -1218,38 +1319,41 @@ Task<> Offers::get_received_offers(
         "JOIN users u ON o.user_id = u.id "
         "WHERE p.user_id = $1 "
         "ORDER BY o.updated_at DESC",
-        std::stoi(current_user_id));
+        convert::string_to_int(current_user_id).value());
 
-    Json::Value offers_array(Json::arrayValue);
+    std::vector<ReceivedOfferInfo> received_offers_data;
+    received_offers_data.reserve(result.size());
     for (const auto& row : result) {
-      Json::Value offer;
       int offer_id = row["id"].as<int>();
-      offer["id"] = offer_id;
-      offer["post_id"] = row["post_id"].as<int>();
-      offer["post_content"] = row["post_content"].as<std::string>();
-      offer["user_id"] = row["user_id"].as<int>();
-      offer["offer_username"] = row["offer_username"].as<std::string>();
-      offer["title"] = row["title"].as<std::string>();
-      offer["description"] = row["description"].as<std::string>();
-      offer["price"] = row["price"].as<double>();
-      offer["original_price"] = row["original_price"].as<double>();
-      offer["is_public"] = row["is_public"].as<bool>();
-      offer["status"] = row["status"].as<std::string>();
-      offer["created_at"] = row["created_at"].as<std::string>();
-      offer["updated_at"] = row["updated_at"].as<std::string>();
-
-      offer["media"] = co_await get_media_attachments("offer", offer_id);
-      offers_array.append(offer);
+      auto media_attachments =
+          co_await get_media_attachments("offer", offer_id);
+      received_offers_data.emplace_back(ReceivedOfferInfo{
+          .id = offer_id,
+          .post_id = row["post_id"].as<int>(),
+          .post_content = row["post_content"].as<std::string>(),
+          .user_id = row["user_id"].as<int>(),
+          .offer_username = row["offer_username"].as<std::string>(),
+          .title = row["title"].as<std::string>(),
+          .description = row["description"].as<std::string>(),
+          .price = row["price"].as<double>(),
+          .original_price = row["original_price"].as<double>(),
+          .is_public = row["is_public"].as<bool>(),
+          .status = row["status"].as<std::string>(),
+          .created_at = row["created_at"].as<std::string>(),
+          .updated_at = row["updated_at"].as<std::string>(),
+          .media = media_attachments.value_or({})});
     }
 
-    auto resp = HttpResponse::newHttpJsonResponse(offers_array);
+    auto resp =
+        HttpResponse::newHttpResponse(drogon::k200OK, CT_APPLICATION_JSON);
+    resp->setBody(glz::write_json(received_offers_data).value_or(""));
     callback(resp);
   } catch (const DrogonDbException& e) {
     LOG_ERROR << "Database error: " << e.base().what();
-    Json::Value error;
-    error["error"] = "Database error";
-    auto resp = HttpResponse::newHttpJsonResponse(error);
-    resp->setStatusCode(k500InternalServerError);
+    SimpleError error{.error = "Database error"};
+    auto resp = HttpResponse::newHttpResponse(k500InternalServerError,
+                                              CT_APPLICATION_JSON);
+    resp->setBody(glz::write_json(error).value_or(""));
     callback(resp);
   }
 
@@ -1275,31 +1379,32 @@ Task<> Offers::get_notifications(
         "JOIN posts p ON o.post_id = p.id "
         "WHERE n.user_id = $1 "
         "ORDER BY n.created_at DESC",
-        std::stoi(current_user_id));
+        convert::string_to_int(current_user_id).value());
 
-    Json::Value notifications_array(Json::arrayValue);
+    std::vector<NotificationInfo> notifications_data;
+    notifications_data.reserve(result.size());
     for (const auto& row : result) {
-      Json::Value notification;
-      notification["id"] = row["id"].as<int>();
-      notification["offer_id"] = row["offer_id"].as<int>();
-      notification["is_read"] = row["is_read"].as<bool>();
-      notification["created_at"] = row["created_at"].as<std::string>();
-      notification["offer_title"] = row["offer_title"].as<std::string>();
-      notification["offer_status"] = row["offer_status"].as<std::string>();
-      notification["offer_username"] = row["offer_username"].as<std::string>();
-      notification["post_content"] = row["post_content"].as<std::string>();
-
-      notifications_array.append(notification);
+      notifications_data.push_back(NotificationInfo{
+          .id = row["id"].as<int>(),
+          .offer_id = row["offer_id"].as<int>(),
+          .is_read = row["is_read"].as<bool>(),
+          .created_at = row["created_at"].as<std::string>(),
+          .offer_title = row["offer_title"].as<std::string>(),
+          .offer_status = row["offer_status"].as<std::string>(),
+          .offer_username = row["offer_username"].as<std::string>(),
+          .post_content = row["post_content"].as<std::string>()});
     }
 
-    auto resp = HttpResponse::newHttpJsonResponse(notifications_array);
+    auto resp =
+        HttpResponse::newHttpResponse(drogon::k200OK, CT_APPLICATION_JSON);
+    resp->setBody(glz::write_json(notifications_data).value_or(""));
     callback(resp);
   } catch (const DrogonDbException& e) {
     LOG_ERROR << "Database error: " << e.base().what();
-    Json::Value error;
-    error["error"] = "Database error";
-    auto resp = HttpResponse::newHttpJsonResponse(error);
-    resp->setStatusCode(k500InternalServerError);
+    SimpleError error{.error = "Database error"};
+    auto resp = HttpResponse::newHttpResponse(k500InternalServerError,
+                                              CT_APPLICATION_JSON);
+    resp->setBody(glz::write_json(error).value_or(""));
     callback(resp);
   }
 
@@ -1320,28 +1425,31 @@ Task<> Offers::mark_notification_read(
         "UPDATE offer_notifications SET is_read = TRUE "
         "WHERE id = $1 AND user_id = $2 "
         "RETURNING id",
-        std::stoi(id), std::stoi(current_user_id));
+        convert::string_to_int(id).value(),
+        convert::string_to_int(current_user_id).value());
 
     if (result.empty()) {
-      Json::Value error;
-      error["error"] = "Notification not found or you don't have permission";
-      auto resp = HttpResponse::newHttpJsonResponse(error);
-      resp->setStatusCode(k404NotFound);
+      SimpleError error{
+          .error = "Notification not found or you don't have permission"};
+      auto resp =
+          HttpResponse::newHttpResponse(k404NotFound, CT_APPLICATION_JSON);
+      resp->setBody(glz::write_json(error).value_or(""));
       callback(resp);
       co_return;
     }
 
-    Json::Value ret;
-    ret["status"] = "success";
-    ret["message"] = "Notification marked as read";
-    auto resp = HttpResponse::newHttpJsonResponse(ret);
+    StatusResponse response{.status = "success",
+                            .message = "Notification marked as read"};
+    auto resp =
+        HttpResponse::newHttpResponse(drogon::k200OK, CT_APPLICATION_JSON);
+    resp->setBody(glz::write_json(response).value_or(""));
     callback(resp);
   } catch (const DrogonDbException& e) {
     LOG_ERROR << "Database error: " << e.base().what();
-    Json::Value error;
-    error["error"] = "Database error";
-    auto resp = HttpResponse::newHttpJsonResponse(error);
-    resp->setStatusCode(k500InternalServerError);
+    SimpleError error{.error = "Database error"};
+    auto resp = HttpResponse::newHttpResponse(k500InternalServerError,
+                                              CT_APPLICATION_JSON);
+    resp->setBody(glz::write_json(error).value_or(""));
     callback(resp);
   }
 
@@ -1360,19 +1468,20 @@ Task<> Offers::mark_all_notifications_read(
     co_await db->execSqlCoro(
         "UPDATE offer_notifications SET is_read = TRUE "
         "WHERE user_id = $1 AND is_read = FALSE",
-        std::stoi(current_user_id));
+        convert::string_to_int(current_user_id).value());
 
-    Json::Value ret;
-    ret["status"] = "success";
-    ret["message"] = "All notifications marked as read";
-    auto resp = HttpResponse::newHttpJsonResponse(ret);
+    StatusResponse response{.status = "success",
+                            .message = "All notifications marked as read"};
+    auto resp =
+        HttpResponse::newHttpResponse(drogon::k200OK, CT_APPLICATION_JSON);
+    resp->setBody(glz::write_json(response).value_or(""));
     callback(resp);
   } catch (const DrogonDbException& e) {
     LOG_ERROR << "Database error: " << e.base().what();
-    Json::Value error;
-    error["error"] = "Database error";
-    auto resp = HttpResponse::newHttpJsonResponse(error);
-    resp->setStatusCode(k500InternalServerError);
+    SimpleError error{.error = "Database error"};
+    auto resp = HttpResponse::newHttpResponse(k500InternalServerError,
+                                              CT_APPLICATION_JSON);
+    resp->setBody(glz::write_json(error).value_or(""));
     callback(resp);
   }
 

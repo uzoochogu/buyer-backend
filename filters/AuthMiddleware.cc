@@ -5,12 +5,13 @@
 #include <jwt-cpp/jwt.h>
 #include <jwt-cpp/traits/open-source-parsers-jsoncpp/traits.h>
 
+#include <glaze/glaze.hpp>
 #include <string>
 
 #include "../config/config.hpp"
+#include "../controllers/common_req_n_resp.hpp"
 
 using drogon::HttpResponse;
-using drogon::k401Unauthorized;
 
 class AuthMiddleware : public drogon::HttpCoroMiddleware<AuthMiddleware> {
  public:
@@ -29,17 +30,15 @@ class AuthMiddleware : public drogon::HttpCoroMiddleware<AuthMiddleware> {
       const std::string &auth_header = req->getHeader("Authorization");
 
       if (auth_header.empty() || auth_header.substr(0, 7) != "Bearer ") {
-        auto resp = HttpResponse::newHttpJsonResponse(
-            {{"error", "Unauthorized: No valid token provided"}});
-        resp->setStatusCode(k401Unauthorized);
+        auto resp = HttpResponse::newHttpResponse(drogon::k401Unauthorized,
+                                                  drogon::CT_APPLICATION_JSON);
+        SimpleError err{.error = "Unauthorized: No valid token provided"};
+        resp->setBody(glz::write_json(err).value_or(""));
         co_return resp;
       }
-
-      // Extract the token
       std::string token = auth_header.substr(7);
 
       using traits = jwt::traits::open_source_parsers_jsoncpp;
-      // Verify the token
       auto decoded = jwt::decode<traits>(token);
 
       // Verify signature and expiration
@@ -48,24 +47,18 @@ class AuthMiddleware : public drogon::HttpCoroMiddleware<AuthMiddleware> {
               .allow_algorithm(jwt::algorithm::hs256{config::JWT_SECRET})
               .with_issuer("buyer-app");
 
-      verifier.verify(decoded);
-
       // Extract user ID from token and add to request attributes for later use
-      // The user_id is stored as a string in the JWT, so extract it as a string
+      verifier.verify(decoded);
+      auto claim = decoded.get_payload_claim("user_id");
+      auto payload_type = claim.get_type();
       std::string user_id;
-      try {
-        // First try as string
-        user_id = decoded.get_payload_claim("user_id").as_string();
-      } catch (...) {
-        try {
-          // If that fails, try as integer and convert to string
-          user_id =
-              std::to_string(decoded.get_payload_claim("user_id").as_integer());
-        } catch (const std::exception &e) {
-          LOG_ERROR << "Failed to extract user_id from token: " << e.what();
-          throw;
-        }
-      }
+      if (payload_type == jwt::json::type::integer ||
+          payload_type == jwt::json::type::number)
+        user_id = std::to_string(static_cast<int>(claim.as_number()));
+      else if (payload_type == jwt::json::type::string)
+        user_id = claim.as_string();
+      else
+        throw std::exception("invalid type");
 
       // Pass user_id through request attributes
       req->getAttributes()->insert("current_user_id", user_id);
@@ -75,10 +68,11 @@ class AuthMiddleware : public drogon::HttpCoroMiddleware<AuthMiddleware> {
       co_return resp;
     } catch (const std::exception &e) {
       LOG_ERROR << "Auth error: " << e.what();
-      auto resp = HttpResponse::newHttpJsonResponse(
-          {{"error", "Unauthorized: Invalid token"}});
-      resp->setStatusCode(k401Unauthorized);
-      co_return (resp);
+      auto resp = HttpResponse::newHttpResponse(drogon::k401Unauthorized,
+                                                drogon::CT_APPLICATION_JSON);
+      SimpleError err{.error = "Unauthorized: Invalid token"};
+      resp->setBody(glz::write_json(err).value_or(""));
+      co_return resp;
     }
   }
 };
